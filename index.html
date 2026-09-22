@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>填空题 AI 阅卷可视化</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <link rel="stylesheet" href="assets/app.css?v=23" />
+</head>
+<body>
+  <div class="app" id="app">
+    <header class="top-strip">
+      <div class="folder-bar">
+        <button type="button" class="folder-btn" id="pickFolderBtn">选择文件夹</button>
+        <button type="button" class="text-btn" id="reloadBtn" disabled>重新读取</button>
+        <button type="button" class="text-btn" id="exportBtn" disabled>导出正确率</button>
+        <input id="folderInput" type="file" webkitdirectory multiple accept=".json,application/json" hidden />
+        <label class="task-filter">
+          <span class="sr-only">任务筛选</span>
+          <select id="taskFilter" disabled>
+            <option value="all">全部任务</option>
+          </select>
+        </label>
+        <p class="folder-meta" id="folderMeta">选择考试日期目录可合并多个任务</p>
+      </div>
+      <div class="q-strip">
+        <div class="q-badge" id="qBadge">—</div>
+        <div class="q-strip-text">
+          <h2 id="qHeading">第 — 题</h2>
+          <p class="q-sub" id="qSub"></p>
+        </div>
+        <div class="stat-row" id="statRow"></div>
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <div class="kicker">题目</div>
+        <span class="count-pill" id="qCount">0</span>
+      </div>
+      <nav class="q-nav" id="qNav"></nav>
+      <div class="sidebar-legend">
+        <span><i class="dot ok"></i>整题正确</span>
+        <span><i class="dot bad"></i>有空错误</span>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="workspace">
+        <article class="panel slice-panel">
+          <div class="panel-head compact">
+            <div class="slice-who" id="sliceWho">未选学生</div>
+            <div class="zoom-ctrl">
+              <button type="button" id="zoomOut" aria-label="缩小">−</button>
+              <span id="zoomLabel">100%</span>
+              <button type="button" id="zoomIn" aria-label="放大">+</button>
+              <button type="button" id="zoomReset" class="text-btn">复位</button>
+            </div>
+          </div>
+          <div class="slice-stage" id="sliceStage">
+            <div class="slice-viewport" id="sliceViewport">
+              <div class="slice-board" id="sliceBoard"></div>
+            </div>
+          </div>
+          <div class="slice-foot">
+            <a id="originLink" href="#" target="_blank" rel="noopener">原图</a>
+            <span class="slice-note" id="sliceNote"></span>
+            <div class="sidebar-legend">
+              <span><i class="box ok"></i>正确</span>
+              <span><i class="box bad"></i>错误</span>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel result-panel">
+          <div class="result-toolbar">
+            <div class="blank-switch" id="blankTabs"></div>
+            <div class="filter-row inline">
+              <div class="seg" id="statusFilter">
+                <button type="button" data-filter="all" class="on">全部</button>
+                <button type="button" data-filter="right">正确</button>
+                <button type="button" data-filter="wrong">错误</button>
+              </div>
+              <label class="search">
+                <span class="sr-only">搜索</span>
+                <input id="stuSearch" type="search" placeholder="学号 / 任务 / 文件" />
+              </label>
+              <span class="result-total"><strong id="shownCount">0</strong><span id="shownLabel">人</span></span>
+            </div>
+          </div>
+
+          <div class="ref-card" id="refLine"></div>
+
+          <div class="table-wrap">
+            <table class="stu-table" id="stuTable">
+              <thead id="stuHead"></thead>
+              <tbody id="stuBody"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <footer class="foot" id="foot"></footer>
+    </main>
+  </div>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="assets/app.js?v=24"></script>
+</body>
+</html>
