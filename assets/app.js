@@ -268,11 +268,15 @@
     const taskId = fromJson || taskFolderFromPath(path, "");
     const taskFolder = taskFolderFromPath(path, taskId) || taskId;
     const key = `${taskId || taskFolder || "task"}::${file}::${rec.stu_no || rec.student_id || rec.stuScanId || ""}`;
+    const taskIdRaw = rec.task_id || rec.pre_task_id || "";
+    const idx = rec.idx != null ? rec.idx : (rec.idx_num != null ? rec.idx_num : null);
     return {
       key,
       stuNo: rec.stu_no || "",
       studentId: rec.student_id || "",
       scanId: rec.stuScanId || rec._id || "",
+      taskIdRaw,
+      idx,
       page: rec.page || 1,
       width: Number(rec.width || 0),
       height: Number(rec.height || 0),
@@ -802,6 +806,51 @@
     return stu.file || "";
   }
 
+  function studentMetaPayload(stu) {
+    if (!stu) return null;
+    const payload = {
+      task_id: stu.taskIdRaw || stu.taskId || stu.taskFolder || "",
+      idx: stu.idx != null ? stu.idx : null,
+    };
+    return JSON.stringify(payload, null, 2);
+  }
+
+  async function copyText(text) {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (err) {
+      /* fallback below */
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (err) {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  function updateCopyMetaBtn(student) {
+    const btn = $("copyMetaBtn");
+    if (!btn) return;
+    btn.disabled = !student;
+    btn.title = student
+      ? `复制 task_id 与 idx（${student.stuNo || "当前学生"}）`
+      : "请先选中一名学生";
+  }
+
   function renderTaskFilter() {
     const sel = $("taskFilter");
     if (!sel) return;
@@ -1074,6 +1123,7 @@
     $("sliceWho").textContent = "未选学生";
     $("sliceNote").textContent = "";
     if ($("exportBtn")) $("exportBtn").disabled = true;
+    updateCopyMetaBtn(null);
     $("stuHead").innerHTML = "";
     $("stuBody").innerHTML = "";
     $("foot").innerHTML = `<span>${examTypeLabel(state.examType)} · 数据来自所选文件夹中的 JSON</span><span></span>`;
@@ -1107,6 +1157,7 @@
     renderBlankTabs(question);
     renderSlice(question, student);
     renderTable(question, list, student);
+    updateCopyMetaBtn(student);
   }
 
   function bind() {
@@ -1227,6 +1278,24 @@
         console.error(err);
         $("folderMeta").textContent = "导出失败：" + (err.message || err);
       }
+    });
+    $("copyMetaBtn").addEventListener("click", async () => {
+      const question = (window.EXAM_DATA.questions || [])[state.qIndex];
+      if (!question) return;
+      const list = filteredStudents(question);
+      const student = currentStudent(list);
+      const text = studentMetaPayload(student);
+      if (!text) return;
+      const btn = $("copyMetaBtn");
+      const ok = await copyText(text);
+      if (btn) {
+        const prev = btn.textContent;
+        btn.textContent = ok ? "已复制" : "复制失败";
+        setTimeout(() => {
+          btn.textContent = prev;
+        }, 1500);
+      }
+      if (!ok) $("folderMeta").textContent = "复制失败，请检查浏览器权限";
     });
   }
 

@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
-  <link rel="stylesheet" href="assets/app.css?v=29" />
+  <link rel="stylesheet" href="assets/app.css?v=30" />
 </head>
 <body>
   <div class="app" id="app">
@@ -93,6 +93,7 @@
                 <input id="stuSearch" type="search" placeholder="学号 / 任务 / 文件" />
               </label>
               <span class="result-total"><strong id="shownCount">0</strong><span id="shownLabel">人</span></span>
+              <button type="button" class="copy-meta-btn" id="copyMetaBtn" disabled>复制 task / idx</button>
             </div>
           </div>
 
@@ -111,6 +112,6 @@
     </main>
   </div>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script defer src="assets/app.js?v=29"></script>
+  <script defer src="assets/app.js?v=30"></script>
 </body>
 </html>

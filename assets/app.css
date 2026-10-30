@@ -546,6 +546,25 @@ body {
   color: var(--ink);
   font: 700 15px/1 "IBM Plex Sans", sans-serif;
 }
+.copy-meta-btn {
+  flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--forest);
+  font: 600 12px/1 "Noto Sans SC", sans-serif;
+  cursor: pointer;
+}
+.copy-meta-btn:hover:not(:disabled) {
+  background: #f4f8f2;
+  border-color: #c5d4bc;
+}
+.copy-meta-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 
 .ref-card {
   margin-top: 8px;
