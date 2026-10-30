@@ -3,7 +3,10 @@
   const MM_PER_INCH = 25.4;
   window.EXAM_DATA = window.EXAM_DATA || { examId: "", taskId: "", dpi: DPI, questions: [], students: [] };
 
+  const OPTION_LABELS = "ABCDEFGH".split("");
+
   const state = {
+    examType: "fill",
     qIndex: 0,
     studentKey: "",
     filter: "all",
@@ -12,6 +15,19 @@
     blankIndex: 0,
     zoom: 1,
   };
+
+  function examTypeLabel(type) {
+    return type === "choice" ? "选择题" : "填空题";
+  }
+
+  function answerIntToLetters(n) {
+    const v = Number(n) || 0;
+    let s = "";
+    for (let i = 0; i < OPTION_LABELS.length; i += 1) {
+      if (v & (1 << i)) s += OPTION_LABELS[i];
+    }
+    return s;
+  }
 
   const $ = (id) => document.getElementById(id);
 
@@ -130,7 +146,54 @@
     return [nx, ny, Math.max(1, nr - nx), Math.max(1, nb - ny)].map((v) => Math.round(v * 10000) / 10000);
   }
 
-  function extractQs(rec) {
+  function extractQsChoice(rec) {
+    const pageW = Number(rec.width || 0);
+    const pageH = Number(rec.height || 0);
+    const qs = {};
+    for (const q of rec.questions || []) {
+      if (!Array.isArray(q.list) || Number(q.total_score || 0) <= 0) continue;
+      const qno = String(q.question_no || 0);
+      if (!qno || qno === "0") continue;
+      const score = Number(q.score || 0);
+      const total = Number(q.total_score || 0);
+      let right = total > 0 && score >= total;
+      if (!right && q.detect_score != null && total > 0) {
+        right = Number(q.detect_score) >= total;
+      }
+      const options = (q.list || []).map((opt, i) => ({
+        letter: OPTION_LABELS[i] || String(i + 1),
+        fill: !!(opt && opt.fill),
+        pos: opt && Array.isArray(opt.pos) ? opt.pos.slice(0, 4) : [],
+      }));
+      const user = String(q.user_answer || "").trim() || answerIntToLetters(q.detect_answer_int);
+      const ref = answerIntToLetters(q.answer_int);
+      const posBoxes = [];
+      if (q.pos && q.pos.length >= 4) posBoxes.push(q.pos);
+      for (const opt of options) {
+        if (opt.pos.length === 4) posBoxes.push(opt.pos);
+      }
+      const pos = inflatePos(unionPos(posBoxes) || [0, 0, pageW, pageH], 2, pageW, pageH);
+      qs[qno] = {
+        score: Math.round(score * 100) / 100,
+        total: Math.round(total * 100) / 100,
+        pos,
+        blanks: [{
+          right,
+          user,
+          ref,
+          score,
+          total,
+          pos: [],
+        }],
+        options,
+        multi: !!q.multi,
+        questionType: q.question_type,
+      };
+    }
+    return qs;
+  }
+
+  function extractQsFill(rec) {
     const pageW = Number(rec.width || 0);
     const pageH = Number(rec.height || 0);
     const grouped = {};
@@ -177,6 +240,11 @@
     return qs;
   }
 
+  function extractQs(rec) {
+    if (state.examType === "choice") return extractQsChoice(rec);
+    return extractQsFill(rec);
+  }
+
   function taskFolderFromPath(relPath, fallback) {
     const parts = String(relPath || "").replace(/\\/g, "/").split("/").filter(Boolean);
     // …/{taskId}/detect/000xxx.json
@@ -217,6 +285,7 @@
   }
 
   function buildQuestions(students) {
+    const typeLabel = examTypeLabel(state.examType);
     const meta = {};
     for (const stu of students) {
       for (const [qno, rec] of Object.entries(stu.qs || {})) {
@@ -224,10 +293,11 @@
           meta[qno] = {
             no: Number(qno),
             id: "",
-            type: 3,
-            aiMode: 1,
-            label: "填空题",
+            type: state.examType === "choice" ? 8 : 3,
+            aiMode: state.examType === "choice" ? 0 : 1,
+            label: typeLabel,
             blankCount: 0,
+            optionCount: 0,
             totalScore: 0,
             refAnswers: [],
             refImages: [],
@@ -235,7 +305,12 @@
           };
         }
         const blanks = rec.blanks || [];
-        meta[qno].blankCount = Math.max(meta[qno].blankCount, blanks.length);
+        if (state.examType === "choice") {
+          meta[qno].blankCount = 0;
+          meta[qno].optionCount = Math.max(meta[qno].optionCount, (rec.options || []).length);
+        } else {
+          meta[qno].blankCount = Math.max(meta[qno].blankCount, blanks.length);
+        }
         meta[qno].totalScore = Math.max(meta[qno].totalScore, rec.total || 0);
         if (!meta[qno].pos && rec.pos) meta[qno].pos = rec.pos;
         if (blanks.length) {
@@ -260,7 +335,14 @@
   };
 
   function isStudentRec(rec) {
-    return rec && typeof rec === "object" && (Array.isArray(rec.ai_questions) || rec.stu_no != null);
+    if (!rec || typeof rec !== "object") return false;
+    if (rec.stu_no != null || rec.student_id != null) return true;
+    if (state.examType === "choice") return Array.isArray(rec.questions);
+    return Array.isArray(rec.ai_questions);
+  }
+
+  function hasParsedQuestions(stu) {
+    return stu && stu.qs && Object.keys(stu.qs).length > 0;
   }
 
   function sortStudents(recs) {
@@ -293,6 +375,7 @@
     window.EXAM_DATA = {
       examId: students[0] ? students[0].examId : "",
       taskId: students[0] ? students[0].taskId : "",
+      examType: state.examType,
       dpi: DPI,
       questions: buildQuestions(students),
       students,
@@ -340,11 +423,12 @@
     }
     const items = await collectJsonHandles(dirHandle, "");
     items.sort((a, b) => a.path.localeCompare(b.path, "en", { numeric: true }));
-    const recs = (await Promise.all(items.map(async (item) => {
+    let recs = (await Promise.all(items.map(async (item) => {
       const file = await item.handle.getFile();
       return parseJsonFile(file, item.path);
     }))).filter(Boolean);
-    if (!recs.length) throw new Error("文件夹里没有可解析的学生 JSON");
+    recs = recs.filter(hasParsedQuestions);
+    if (!recs.length) throw new Error(`文件夹里没有可解析的${examTypeLabel(state.examType)} JSON`);
     applyStudents(recs, dirHandle.name);
   }
 
@@ -355,16 +439,17 @@
       return /\.json$/i.test(base) && !/^(package(-lock)?|tsconfig|exam)\.json$/i.test(base);
     });
     files.sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, "en", { numeric: true }));
-    const recs = (await Promise.all(files.map((file) => {
+    let recs = (await Promise.all(files.map((file) => {
       const rel = (file.webkitRelativePath || file.name).replace(/\\/g, "/");
       const parts = rel.split("/");
       const path = parts.length > 1 ? parts.slice(1).join("/") : rel;
       return parseJsonFile(file, path);
     }))).filter(Boolean);
+    recs = recs.filter(hasParsedQuestions);
     const folderName = files[0] && files[0].webkitRelativePath
       ? files[0].webkitRelativePath.split(/[\\/]/)[0]
       : (folderSource.name || "已选文件夹");
-    if (!recs.length) throw new Error("文件夹里没有可解析的学生 JSON");
+    if (!recs.length) throw new Error(`文件夹里没有可解析的${examTypeLabel(state.examType)} JSON`);
     applyStudents(recs, folderName);
   }
 
@@ -467,20 +552,23 @@
   function buildRateRows() {
     const questions = window.EXAM_DATA.questions || [];
     const rows = [];
+    const isChoice = state.examType === "choice";
     for (const q of questions) {
-      const count = q.blankCount || 0;
+      const count = isChoice ? 1 : (q.blankCount || 0);
       for (let i = 0; i < count; i += 1) {
-        const b = blankStats(q, i);
-        const wrong = Math.max(0, b.total - b.right);
+        const b = isChoice ? questionStats(q) : blankStats(q, i);
+        const total = isChoice ? b.total : b.total;
+        const right = isChoice ? b.full : b.right;
+        const wrong = Math.max(0, total - right);
         rows.push({
           qno: q.no,
-          blank: "空" + (i + 1),
-          total: b.total,
-          right: b.right,
+          blank: isChoice ? "选项" : "空" + (i + 1),
+          total,
+          right,
           wrong,
-          rightRate: b.rate,
-          wrongRate: b.total ? wrong / b.total : 0,
-          ref: refText(q, i),
+          rightRate: total ? right / total : 0,
+          wrongRate: total ? wrong / total : 0,
+          ref: refText(q, isChoice ? 0 : i),
         });
       }
     }
@@ -639,7 +727,7 @@
       const stats = questionStats(q);
       return `<button type="button" class="q-item${i === state.qIndex ? " on" : ""}" data-q="${i}">
         <span class="no">${q.no}</span>
-        <span><b>填空题</b><small>${stats.full}/${stats.total}</small></span>
+        <span><b>${escapeHtml(q.label || examTypeLabel(state.examType))}</b><small>${stats.full}/${stats.total}</small></span>
         <span class="rate">${fmtPct(stats.studentRate)}</span>
       </button>`;
     }).join("");
@@ -648,8 +736,20 @@
   function renderHeader(question, stats) {
     $("qBadge").textContent = question.no;
     $("qHeading").textContent = `第 ${question.no} 题`;
-    $("qSub").textContent = `${question.blankCount} 空 · 满分 ${question.totalScore}`;
-    if (state.blankIndex >= 0) {
+    if (state.examType === "choice") {
+      const opts = question.optionCount || (question.refAnswers || []).length || 4;
+      $("qSub").textContent = `${opts} 项 · ${question.label || "选择题"} · 满分 ${question.totalScore}`;
+    } else {
+      $("qSub").textContent = `${question.blankCount} 空 · 满分 ${question.totalScore}`;
+    }
+    if (state.examType === "choice") {
+      $("statRow").innerHTML = `
+        <div class="stat green"><b>${stats.full}/${stats.total}</b><span>答对人数</span></div>
+        <div class="stat"><b>${fmtPct(stats.studentRate)}</b><span>正确率</span></div>
+        <div class="stat"><b>${escapeHtml(refText(question, 0) || "—")}</b><span>参考答案</span></div>
+      `;
+      $("shownLabel").textContent = "人";
+    } else if (state.blankIndex >= 0) {
       const b = blankStats(question, state.blankIndex);
       $("statRow").innerHTML = `
         <div class="stat green"><b>${b.right}/${b.total}</b><span>本空正确</span></div>
@@ -669,6 +769,16 @@
   }
 
   function renderBlankTabs(question) {
+    if (state.examType === "choice") {
+      state.blankIndex = -1;
+      $("blankTabs").innerHTML = `<button type="button" class="blank-tab on" data-blank="-1">整题</button>`;
+      const ref = refText(question, 0);
+      $("refLine").innerHTML = `
+        <span class="ref-label">参考答案</span>
+        <div class="ref-body"><strong class="ref-value">${ref ? escapeHtml(ref) : "—"}</strong></div>
+      `;
+      return;
+    }
     const count = question.blankCount || (question.refAnswers || []).length;
     const tabs = [`<button type="button" class="blank-tab${state.blankIndex < 0 ? " on" : ""}" data-blank="-1">整题</button>`];
     for (let i = 0; i < count; i += 1) {
@@ -712,18 +822,39 @@
     const [x, y, w, h] = pos;
     const imgUrl = ossCrop(student.image, pos);
     const blanks = rec.blanks || [];
-    const boxes = blanks.map((blank, i) => {
-      if (!blank.pos || blank.pos.length < 4) return "";
-      const [bx, by, bw, bh] = blank.pos;
-      const left = ((bx - x) / w) * 100;
-      const top = ((by - y) / h) * 100;
-      const width = (bw / w) * 100;
-      const height = (bh / h) * 100;
-      const on = state.blankIndex === i ? " on" : "";
-      const dim = state.blankIndex >= 0 && state.blankIndex !== i ? " dim" : "";
-      const cls = blank.right ? "" : " wrong";
-      return `<div class="blank${cls}${on}${dim}" data-blank="${i}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%;color:${blank.right ? "var(--ok)" : "var(--bad)"}"><span>空${i + 1}</span></div>`;
-    }).join("");
+    const refLetters = String((blanks[0] && blanks[0].ref) || refText(question, 0) || "");
+    let boxes = "";
+    if ((rec.options || []).length) {
+      boxes = rec.options.map((opt) => {
+        if (!opt.pos || opt.pos.length < 4) return "";
+        const [bx, by, bw, bh] = opt.pos;
+        const left = ((bx - x) / w) * 100;
+        const top = ((by - y) / h) * 100;
+        const width = (bw / w) * 100;
+        const height = (bh / h) * 100;
+        const filled = !!opt.fill;
+        const isRef = refLetters.includes(opt.letter);
+        let cls = " option";
+        if (filled) cls += " filled";
+        if (filled && blanks[0] && !blanks[0].right) cls += " wrong";
+        if (!filled && !isRef) cls += " dim";
+        if (isRef && !filled) cls += " ref-hint";
+        return `<div class="blank${cls}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%;color:${filled ? (blanks[0] && blanks[0].right ? "var(--ok)" : "var(--bad)") : "var(--muted)"}"><span>${escapeHtml(opt.letter)}</span></div>`;
+      }).join("");
+    } else {
+      boxes = blanks.map((blank, i) => {
+        if (!blank.pos || blank.pos.length < 4) return "";
+        const [bx, by, bw, bh] = blank.pos;
+        const left = ((bx - x) / w) * 100;
+        const top = ((by - y) / h) * 100;
+        const width = (bw / w) * 100;
+        const height = (bh / h) * 100;
+        const on = state.blankIndex === i ? " on" : "";
+        const dim = state.blankIndex >= 0 && state.blankIndex !== i ? " dim" : "";
+        const cls = blank.right ? "" : " wrong";
+        return `<div class="blank${cls}${on}${dim}" data-blank="${i}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%;color:${blank.right ? "var(--ok)" : "var(--bad)"}"><span>空${i + 1}</span></div>`;
+      }).join("");
+    }
 
     board.style.aspectRatio = `${w} / ${h}`;
     board.style.width = `${Math.round(state.zoom * 100)}%`;
@@ -769,14 +900,27 @@
       }).join("");
       return;
     }
-    $("stuHead").innerHTML = `<tr><th></th><th>学生</th><th>各空</th><th>得分</th><th></th></tr>`;
+    const optHead = state.examType === "choice" ? "选项" : "各空";
+    $("stuHead").innerHTML = `<tr><th></th><th>学生</th><th>${optHead}</th><th>得分</th><th></th></tr>`;
     $("stuBody").innerHTML = list.map((stu) => {
       const rec = recOf(stu, question);
       const j = judge(rec);
       const on = selected && selected.key === stu.key ? " on" : "";
-      const dots = rec.blanks.map((b, i) =>
-        `<button type="button" class="mini ${b.right ? "ok" : "bad"}" data-blank="${i}">${i + 1}</button>`
-      ).join("");
+      let dots = "";
+      if ((rec.options || []).length) {
+        const main = rec.blanks[0] || {};
+        const refLetters = String(main.ref || "");
+        dots = rec.options.map((opt) => {
+          let cls = "idle";
+          if (opt.fill) cls = main.right ? "ok" : "bad";
+          else if (refLetters.includes(opt.letter)) cls += " ref-hint";
+          return `<span class="mini ${cls.trim()}" title="${opt.fill ? "填涂" : "未涂"}">${escapeHtml(opt.letter)}</span>`;
+        }).join("");
+      } else {
+        dots = rec.blanks.map((b, i) =>
+          `<button type="button" class="mini ${b.right ? "ok" : "bad"}" data-blank="${i}">${i + 1}</button>`
+        ).join("");
+      }
       return `<tr class="${on}" data-stu="${escapeHtml(stu.key)}">
         <td><i class="dot ${j.key}"></i></td>
         <td class="stu-cell"><b>${escapeHtml(stu.stuNo)}</b><span class="sid">${escapeHtml(studentLabel(stu))}</span></td>
@@ -792,7 +936,7 @@
     $("qNav").innerHTML = "";
     $("qBadge").textContent = "—";
     $("qHeading").textContent = "第 — 题";
-    $("qSub").textContent = "请选择考试日期目录或单个任务目录";
+    $("qSub").textContent = `当前题型：${examTypeLabel(state.examType)} · 请选择考试日期目录或单个任务目录`;
     $("statRow").innerHTML = "";
     $("shownCount").textContent = "0";
     $("shownLabel").textContent = "人";
@@ -810,7 +954,16 @@
     if ($("exportBtn")) $("exportBtn").disabled = true;
     $("stuHead").innerHTML = "";
     $("stuBody").innerHTML = "";
-    $("foot").innerHTML = `<span>数据来自所选文件夹中的 JSON</span><span></span>`;
+    $("foot").innerHTML = `<span>${examTypeLabel(state.examType)} · 数据来自所选文件夹中的 JSON</span><span></span>`;
+    syncExamTypeSwitch();
+  }
+
+  function syncExamTypeSwitch() {
+    const root = $("examTypeSwitch");
+    if (!root) return;
+    for (const btn of root.querySelectorAll("[data-type]")) {
+      btn.classList.toggle("on", btn.dataset.type === state.examType);
+    }
   }
 
   function render() {
@@ -835,6 +988,26 @@
   }
 
   function bind() {
+    $("examTypeSwitch").addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-type]");
+      if (!btn || btn.dataset.type === state.examType) return;
+      state.examType = btn.dataset.type;
+      state.qIndex = 0;
+      state.studentKey = "";
+      state.blankIndex = 0;
+      state.filter = "all";
+      state.query = "";
+      if ($("stuSearch")) $("stuSearch").value = "";
+      for (const el of $("statusFilter").querySelectorAll("button")) {
+        el.classList.toggle("on", el.dataset.filter === "all");
+      }
+      syncExamTypeSwitch();
+      if (folderSource.handle || folderSource.files.length) {
+        await refreshLive();
+      } else {
+        renderEmpty();
+      }
+    });
     $("qNav").addEventListener("click", (e) => {
       const btn = e.target.closest("[data-q]");
       if (!btn) return;
@@ -965,5 +1138,6 @@
   }
 
   bind();
+  syncExamTypeSwitch();
   renderEmpty();
 })();

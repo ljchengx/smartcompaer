@@ -3,17 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>填空题 AI 阅卷可视化</title>
+  <title>AI 阅卷可视化</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
-  <link rel="stylesheet" href="assets/app.css?v=23" />
+  <link rel="stylesheet" href="assets/app.css?v=25" />
 </head>
 <body>
   <div class="app" id="app">
     <header class="top-strip">
       <div class="folder-bar">
+        <div class="type-switch seg" id="examTypeSwitch" role="group" aria-label="题型">
+          <button type="button" data-type="fill" class="on">填空题</button>
+          <button type="button" data-type="choice">选择题</button>
+        </div>
         <button type="button" class="folder-btn" id="pickFolderBtn">选择文件夹</button>
         <button type="button" class="text-btn" id="reloadBtn" disabled>重新读取</button>
         <button type="button" class="text-btn" id="exportBtn" disabled>导出正确率</button>
@@ -24,7 +28,7 @@
             <option value="all">全部任务</option>
           </select>
         </label>
-        <p class="folder-meta" id="folderMeta">选择考试日期目录可合并多个任务</p>
+        <p class="folder-meta" id="folderMeta">先选题型，再选择考试日期目录（可含多个任务）</p>
       </div>
       <div class="q-strip">
         <div class="q-badge" id="qBadge">—</div>
@@ -107,6 +111,6 @@
     </main>
   </div>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script defer src="assets/app.js?v=24"></script>
+  <script defer src="assets/app.js?v=25"></script>
 </body>
 </html>

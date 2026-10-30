@@ -1,0 +1,9 @@
+{
+  "name": "smartcompaer",
+  "private": true,
+  "description": "AI 阅卷可视化（填空题 / 选择题）",
+  "scripts": {
+    "build": "node scripts/prepare-deploy.js",
+    "prepare:local": "node scripts/prepare-deploy.js"
+  }
+}
