@@ -494,7 +494,15 @@
     }
   }
 
+  function sliceImageUrls(student) {
+    const urls = [];
+    if (student.origin) urls.push(student.origin);
+    if (student.image && student.image !== student.origin) urls.push(student.image);
+    return urls;
+  }
+
   function clearSliceImgStyles(img) {
+    img.classList.remove("slice-img--pan", "slice-img--fit");
     img.style.position = "";
     img.style.left = "";
     img.style.top = "";
@@ -505,14 +513,31 @@
 
   function applyPanCrop(img, student, pos) {
     const [x, y, w, h] = pos.map(Number);
-    const pageW = Number(student.width) || w;
-    clearSliceImgStyles(img);
-    img.style.position = "absolute";
-    img.style.maxWidth = "none";
-    img.style.width = `${(pageW / w) * 100}%`;
-    img.style.height = "auto";
-    img.style.left = `${(-x / w) * 100}%`;
-    img.style.top = `${(-y / h) * 100}%`;
+    const pageWmm = Number(student.width) || w;
+    const pageHmm = Number(student.height) || h;
+
+    const layout = () => {
+      const nw = img.naturalWidth;
+      const nh = img.naturalHeight;
+      if (!nw || !nh) return;
+      const pxPerMmX = nw / pageWmm;
+      const pxPerMmY = nh / pageHmm;
+      const ix = x * pxPerMmX;
+      const iy = y * pxPerMmY;
+      const iw = Math.max(1, w * pxPerMmX);
+      const ih = Math.max(1, h * pxPerMmY);
+      img.classList.add("slice-img--pan");
+      img.classList.remove("slice-img--fit");
+      img.style.position = "absolute";
+      img.style.maxWidth = "none";
+      img.style.width = `${(nw / iw) * 100}%`;
+      img.style.height = "auto";
+      img.style.left = `${(-ix / iw) * 100}%`;
+      img.style.top = `${(-iy / ih) * 100}%`;
+    };
+
+    if (img.complete && img.naturalWidth) layout();
+    else img.addEventListener("load", layout, { once: true });
   }
 
   /** 选择题 option 常只有填涂项带 pos，其余用题框内均分展示 */
@@ -870,7 +895,8 @@
     }
     const pos = rec.pos;
     const [x, y, w, h] = pos.map(Number);
-    const pageImg = student.image || student.origin || "";
+    const sources = sliceImageUrls(student);
+    const pageImg = sources[0] || "";
     const useOss = supportsOssCrop(pageImg);
     const imgUrl = useOss ? ossCrop(pageImg, pos) : pageImg;
     const blanks = rec.blanks || [];
@@ -914,29 +940,34 @@
     board.style.maxWidth = "640px";
     board.style.height = "auto";
     board.style.maxHeight = "none";
-    board.innerHTML = `<img alt="第${question.no}题学生扫描切片" src="${imgUrl.replace(/"/g, "&quot;")}" /><div class="overlay">${boxes}</div>`;
+    board.innerHTML = `<img alt="第${question.no}题学生扫描切片" referrerpolicy="no-referrer" src="${imgUrl.replace(/"/g, "&quot;")}" /><div class="overlay">${boxes}</div>`;
     const img = board.querySelector("img");
-    if (!useOss && pageImg) applyPanCrop(img, student, pos);
-    else clearSliceImgStyles(img);
+    if (useOss) {
+      clearSliceImgStyles(img);
+      img.classList.add("slice-img--fit");
+    } else if (pageImg) {
+      applyPanCrop(img, student, pos);
+    } else {
+      clearSliceImgStyles(img);
+    }
 
     const noteEl = $("sliceNote");
     const showImgError = () => {
-      noteEl.textContent = "扫描图加载失败（链接过期或非 OSS 图），请点「原图」查看";
+      noteEl.textContent = "扫描图加载失败（链接过期），请点「原图」新窗口查看";
       noteEl.classList.add("warn");
     };
 
     img.addEventListener("error", () => {
       const step = Number(img.dataset.fallbackStep || "0");
-      if (step === 0 && student.image && img.src !== student.image) {
-        img.dataset.fallbackStep = "1";
-        img.src = student.image;
-        applyPanCrop(img, student, pos);
-        return;
-      }
-      if (step <= 1 && student.origin && img.src !== student.origin) {
-        img.dataset.fallbackStep = "2";
-        img.src = student.origin;
-        applyPanCrop(img, student, pos);
+      const next = sources[step + 1];
+      if (next && img.src !== next) {
+        img.dataset.fallbackStep = String(step + 1);
+        img.src = supportsOssCrop(next) ? ossCrop(next, pos) : next;
+        if (!supportsOssCrop(next)) applyPanCrop(img, student, pos);
+        else {
+          clearSliceImgStyles(img);
+          img.classList.add("slice-img--fit");
+        }
         return;
       }
       showImgError();
@@ -944,8 +975,9 @@
     img.addEventListener("load", () => {
       noteEl.classList.remove("warn");
       if (!noteEl.textContent.startsWith("扫描图加载失败")) {
-        noteEl.textContent = `第 ${student.page} 页`;
+        noteEl.textContent = `第 ${student.page} 页 · 坐标系 ${Math.round(Number(student.width) || 0)}×${Math.round(Number(student.height) || 0)} mm`;
       }
+      if (!useOss && !img.classList.contains("slice-img--pan")) applyPanCrop(img, student, pos);
     });
 
     origin.href = student.origin || student.image || "#";
@@ -985,7 +1017,9 @@
       if ((rec.options || []).length) {
         const main = rec.blanks[0] || {};
         const refLetters = String(main.ref || "");
-        dots = rec.options.map((opt) => {
+        const ans = escapeHtml(String(main.user || "—"));
+        dots = `<span class="choice-ans ${main.right ? "ok" : "bad"}">${ans}</span>`;
+        dots += rec.options.map((opt) => {
           let cls = "idle";
           if (opt.fill) cls = main.right ? "ok" : "bad";
           else if (refLetters.includes(opt.letter)) cls += " ref-hint";
