@@ -13,11 +13,13 @@
     taskFilter: "all",
     query: "",
     blankIndex: 0,
-    zoom: 1.25,
+    zoom: 1.5,
   };
 
-  /** 切片视口比题框放大比例，便于看到周边区域 */
-  const SLICE_VIEW_SCALE = 1.25;
+  /** 切片视口：题框外扩比例 + 额外边距（mm），便于看全题面 */
+  const SLICE_VIEW_SCALE = 1.85;
+  const SLICE_VIEW_PAD_MM = 10;
+  const SLICE_ZOOM_DEFAULT = 1.5;
 
   function examTypeLabel(type) {
     return type === "choice" ? "选择题" : "填空题";
@@ -508,13 +510,14 @@
     return urls;
   }
 
-  function expandViewPos(pos, pageWmm, pageHmm, scale) {
+  function expandViewPos(pos, pageWmm, pageHmm, scale, padMm) {
     const [x, y, w, h] = pos.map(Number);
     const factor = Math.max(1, Number(scale) || 1);
+    const pad = Math.max(0, Number(padMm) || 0);
     const cx = x + w / 2;
     const cy = y + h / 2;
-    let vw = w * factor;
-    let vh = h * factor;
+    let vw = w * factor + pad * 2;
+    let vh = h * factor + pad * 2;
     let vx = cx - vw / 2;
     let vy = cy - vh / 2;
     if (pageWmm > 0) {
@@ -969,7 +972,7 @@
     const [x, y, w, h] = pos.map(Number);
     const pageWmm = Number(student.width) || w;
     const pageHmm = Number(student.height) || h;
-    const viewPos = expandViewPos(pos, pageWmm, pageHmm, SLICE_VIEW_SCALE);
+    const viewPos = expandViewPos(pos, pageWmm, pageHmm, SLICE_VIEW_SCALE, SLICE_VIEW_PAD_MM);
     const [vx, vy, vw, vh] = viewPos;
     const sources = sliceImageUrls(student);
     const pageImg = sources[0] || "";
@@ -1008,7 +1011,7 @@
 
     board.style.aspectRatio = `${vw} / ${vh}`;
     board.style.width = `${Math.round(state.zoom * 100)}%`;
-    board.style.maxWidth = "640px";
+    board.style.maxWidth = "960px";
     board.style.height = "auto";
     board.style.maxHeight = "none";
     board.innerHTML = `<img alt="第${question.no}题学生扫描切片" referrerpolicy="no-referrer" src="${imgUrl.replace(/"/g, "&quot;")}" /><div class="overlay">${boxes}</div>`;
@@ -1239,7 +1242,7 @@
       render();
     });
     $("zoomReset").addEventListener("click", () => {
-      state.zoom = 1.25;
+      state.zoom = SLICE_ZOOM_DEFAULT;
       render();
     });
     $("pickFolderBtn").addEventListener("click", async () => {
