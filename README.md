@@ -4,7 +4,10 @@
 
 ## 线上地址
 
-<https://smartcompaer.vercel.app>
+- **GitHub Pages（随 `main` 自动更新）**：<https://ljchengx.github.io/smartcompaer/>
+- **Vercel（需项目已连 Git 并部署成功）**：<https://smartcompaer.vercel.app>
+
+若 Vercel 仍显示旧版（标题还是「填空题 AI 阅卷可视化」），请到 Vercel → 项目 **Deployments** 看是否停在旧提交；可 **Redeploy** 最新 `main`，或先用上面的 GitHub Pages 地址。
 
 ## 本地预览
 
