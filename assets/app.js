@@ -565,18 +565,17 @@
     else img.addEventListener("load", layout, { once: true });
   }
 
-  /** 选择题 option 常只有填涂项带 pos，其余用题框内均分展示 */
-  function choiceOptionBox(opt, index, total, qx, qy, qw, qh) {
-    if (opt.pos && opt.pos.length >= 4) return opt.pos.map(Number);
-    const n = Math.max(total, 1);
-    const i = Math.max(0, index);
-    const padX = qw * 0.04;
-    const slotW = (qw - padX * 2) / n;
-    const bw = slotW * 0.82;
-    const bh = Math.max(qh * 0.16, 4);
-    const bx = qx + padX + i * slotW + (slotW - bw) / 2;
-    const by = qy + qh * 0.68;
-    return [bx, by, bw, bh];
+  function renderChoiceTrack(options, blank) {
+    const main = blank || {};
+    const ref = String(main.ref || "");
+    const pick = escapeHtml(String(main.user || "—"));
+    const chips = (options || []).map((opt) => {
+      let cls = "opt-chip";
+      if (opt.fill) cls += ` filled ${main.right ? "ok" : "bad"}`;
+      else if (ref.includes(opt.letter)) cls += " is-ref";
+      return `<span class="${cls}">${escapeHtml(opt.letter)}</span>`;
+    }).join("");
+    return `<div class="choice-row"><span class="choice-pick ${main.right ? "ok" : "bad"}">${pick}</span><div class="opt-track">${chips}</div></div>`;
   }
 
   function recOf(stu, question) {
@@ -839,9 +838,8 @@
     }
     if (state.examType === "choice") {
       $("statRow").innerHTML = `
-        <div class="stat green"><b>${stats.full}/${stats.total}</b><span>答对人数</span></div>
+        <div class="stat green"><b>${stats.full}/${stats.total}</b><span>答对</span></div>
         <div class="stat"><b>${fmtPct(stats.studentRate)}</b><span>正确率</span></div>
-        <div class="stat"><b>${escapeHtml(refText(question, 0) || "—")}</b><span>参考答案</span></div>
       `;
       $("shownLabel").textContent = "人";
     } else if (state.blankIndex >= 0) {
@@ -932,22 +930,17 @@
     const refLetters = String((blanks[0] && blanks[0].ref) || refText(question, 0) || "");
     let boxes = "";
     if ((rec.options || []).length) {
-      const opts = rec.options;
-      boxes = opts.map((opt, oi) => {
-        const box = choiceOptionBox(opt, oi, opts.length, x, y, w, h);
-        const [bx, by, bw, bh] = box;
+      boxes = rec.options.map((opt) => {
+        if (!opt.pos || opt.pos.length < 4) return "";
+        const [bx, by, bw, bh] = opt.pos.map(Number);
         const left = ((bx - vx) / vw) * 100;
         const top = ((by - vy) / vh) * 100;
         const width = (bw / vw) * 100;
         const height = (bh / vh) * 100;
-        const filled = !!opt.fill;
-        const isRef = refLetters.includes(opt.letter);
-        let cls = " option";
-        if (filled) cls += " filled";
-        if (filled && blanks[0] && !blanks[0].right) cls += " wrong";
-        if (!filled && !isRef) cls += " dim";
-        if (isRef && !filled) cls += " ref-hint";
-        return `<div class="blank${cls}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%;color:${filled ? (blanks[0] && blanks[0].right ? "var(--ok)" : "var(--bad)") : "var(--muted)"}"><span>${escapeHtml(opt.letter)}</span></div>`;
+        if (!opt.fill) return "";
+        const wrong = blanks[0] && !blanks[0].right;
+        const cls = wrong ? " mark wrong" : " mark";
+        return `<div class="blank${cls}" style="left:${left}%;top:${top}%;width:${width}%;height:${height}%"></div>`;
       }).join("");
     } else {
       boxes = blanks.map((blank, i) => {
@@ -1004,7 +997,7 @@
     img.addEventListener("load", () => {
       noteEl.classList.remove("warn");
       if (!noteEl.textContent.startsWith("扫描图加载失败")) {
-        noteEl.textContent = `第 ${student.page} 页 · 坐标系 ${Math.round(Number(student.width) || 0)}×${Math.round(Number(student.height) || 0)} mm`;
+        noteEl.textContent = `第 ${student.page} 页`;
       }
       if (!useOss && !img.classList.contains("slice-img--pan")) applyPanCrop(img, student, viewPos);
     });
@@ -1036,7 +1029,7 @@
       }).join("");
       return;
     }
-    const optHead = state.examType === "choice" ? "选项" : "各空";
+    const optHead = state.examType === "choice" ? "填涂" : "各空";
     $("stuHead").innerHTML = `<tr><th></th><th>学生</th><th>${optHead}</th><th>得分</th><th></th></tr>`;
     $("stuBody").innerHTML = list.map((stu) => {
       const rec = recOf(stu, question);
@@ -1044,16 +1037,7 @@
       const on = selected && selected.key === stu.key ? " on" : "";
       let dots = "";
       if ((rec.options || []).length) {
-        const main = rec.blanks[0] || {};
-        const refLetters = String(main.ref || "");
-        const ans = escapeHtml(String(main.user || "—"));
-        dots = `<span class="choice-ans ${main.right ? "ok" : "bad"}">${ans}</span>`;
-        dots += rec.options.map((opt) => {
-          let cls = "idle";
-          if (opt.fill) cls = main.right ? "ok" : "bad";
-          else if (refLetters.includes(opt.letter)) cls += " ref-hint";
-          return `<span class="mini ${cls.trim()}" title="${opt.fill ? "填涂" : "未涂"}">${escapeHtml(opt.letter)}</span>`;
-        }).join("");
+        dots = renderChoiceTrack(rec.options, rec.blanks[0]);
       } else {
         dots = rec.blanks.map((b, i) =>
           `<button type="button" class="mini ${b.right ? "ok" : "bad"}" data-blank="${i}">${i + 1}</button>`
@@ -1062,7 +1046,7 @@
       return `<tr class="${on}" data-stu="${escapeHtml(stu.key)}">
         <td><i class="dot ${j.key}"></i></td>
         <td class="stu-cell"><b>${escapeHtml(stu.stuNo)}</b><span class="sid">${escapeHtml(studentLabel(stu))}</span></td>
-        <td class="mini-row">${dots}</td>
+        <td class="${state.examType === "choice" ? "choice-cell" : "mini-row"}">${dots}</td>
         <td class="score-cell"><b>${rec.score}/${rec.total}</b></td>
         <td class="judge ${j.key}">${j.text}</td>
       </tr>`;

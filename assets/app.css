@@ -359,8 +359,9 @@ body {
 
 .slice-stage {
   margin-top: 8px;
-  background: #edf2ea;
+  background: linear-gradient(180deg, #f3f6f1 0%, #e8efe5 100%);
   border-radius: 12px;
+  border: 1px solid #dde6d9;
   min-height: 120px;
   flex: 1 1 0;
   overflow: hidden;
@@ -377,8 +378,9 @@ body {
 .slice-board {
   position: relative;
   margin: 0 auto;
-  background: #f7f4ec;
-  box-shadow: 0 8px 24px rgba(22,52,44,.08);
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(22, 52, 44, 0.1);
+  border-radius: 6px;
   overflow: hidden;
   width: min(100%, 720px);
   height: auto;
@@ -401,44 +403,39 @@ body {
 .slice-board .blank {
   position: absolute;
   border: 2px solid var(--ok);
-  box-shadow: 0 0 0 1px rgba(255,255,255,.4) inset;
-  background: rgba(31, 154, 109, .12);
+  border-radius: 3px;
+  background: rgba(31, 154, 109, 0.15);
   cursor: pointer;
+  pointer-events: auto;
 }
-.slice-board .blank.wrong {
+.slice-board .blank.wrong,
+.slice-board .blank.mark.wrong {
   border-color: var(--bad);
-  background: rgba(212, 82, 62, .14);
+  background: rgba(212, 82, 62, 0.12);
+}
+.slice-board .blank.mark {
+  border-width: 2px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.65);
+  cursor: default;
+  pointer-events: none;
 }
 .slice-board .blank.on {
   outline: 2px solid var(--gold);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
-.slice-board .blank.dim { opacity: .28; }
-.slice-board .blank.option {
-  background: rgba(255, 255, 255, .35);
-  border-style: dashed;
-  border-color: rgba(109, 125, 116, .55);
-}
-.slice-board .blank.option.filled {
-  border-style: solid;
-  background: rgba(31, 154, 109, .12);
-}
-.slice-board .blank.option.filled.wrong {
-  background: rgba(212, 82, 62, .14);
-}
-.slice-board .blank.option.ref-hint {
-  box-shadow: 0 0 0 1px rgba(185, 137, 45, .85) inset;
-}
+.slice-board .blank.dim { opacity: 0.35; }
 .slice-board .blank span {
   position: absolute;
   left: 0;
-  top: -16px;
+  top: -18px;
   font-size: 10px;
-  color: inherit;
-  background: #fff;
-  padding: 0 4px;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 1px 5px;
   border-radius: 4px;
   line-height: 14px;
+  box-shadow: 0 1px 2px rgba(22, 52, 44, 0.08);
 }
 .empty-slice {
   width: 100%;
@@ -600,21 +597,64 @@ body {
   flex: 1;
   min-height: 140px;
 }
-.choice-ans {
-  display: inline-flex;
+.choice-cell {
+  min-width: 0;
+}
+.choice-row {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 28px;
-  margin-right: 6px;
-  padding: 0 6px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.choice-pick {
+  flex-shrink: 0;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
   border-radius: 8px;
-  font: 700 15px/1 "IBM Plex Sans", sans-serif;
-  background: #e8eee5;
+  display: inline-grid;
+  place-items: center;
+  font: 700 16px/1 "IBM Plex Sans", sans-serif;
+  background: #f0f4f1;
   color: var(--ink);
 }
-.choice-ans.ok { background: var(--ok-soft); color: var(--ok); }
-.choice-ans.bad { background: var(--bad-soft); color: var(--bad); }
+.choice-pick.ok {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.choice-pick.bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.opt-track {
+  display: inline-flex;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 10px;
+  background: #f4f7f2;
+  border: 1px solid #e2e9de;
+}
+.opt-chip {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  font: 600 12px/1 "IBM Plex Sans", sans-serif;
+  color: #9aa89f;
+}
+.opt-chip.filled {
+  background: #fff;
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(22, 52, 44, 0.08);
+}
+.opt-chip.filled.ok { color: var(--ok); font-weight: 700; }
+.opt-chip.filled.bad { color: var(--bad); font-weight: 700; }
+.opt-chip.is-ref {
+  color: var(--gold);
+  outline: 1px dashed rgba(185, 137, 45, 0.65);
+  outline-offset: -1px;
+}
 .stu-table {
   width: 100%;
   border-collapse: collapse;
