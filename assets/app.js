@@ -13,8 +13,11 @@
     taskFilter: "all",
     query: "",
     blankIndex: 0,
-    zoom: 1,
+    zoom: 1.25,
   };
+
+  /** 切片视口比题框放大比例，便于看到周边区域 */
+  const SLICE_VIEW_SCALE = 1.25;
 
   function examTypeLabel(type) {
     return type === "choice" ? "选择题" : "填空题";
@@ -496,9 +499,31 @@
 
   function sliceImageUrls(student) {
     const urls = [];
-    if (student.origin) urls.push(student.origin);
-    if (student.image && student.image !== student.origin) urls.push(student.image);
+    if (student.image) urls.push(student.image);
+    if (student.origin && student.origin !== student.image) urls.push(student.origin);
     return urls;
+  }
+
+  function expandViewPos(pos, pageWmm, pageHmm, scale) {
+    const [x, y, w, h] = pos.map(Number);
+    const factor = Math.max(1, Number(scale) || 1);
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    let vw = w * factor;
+    let vh = h * factor;
+    let vx = cx - vw / 2;
+    let vy = cy - vh / 2;
+    if (pageWmm > 0) {
+      if (vx < 0) vx = 0;
+      if (vx + vw > pageWmm) vx = Math.max(0, pageWmm - vw);
+      vw = Math.min(vw, pageWmm - vx);
+    }
+    if (pageHmm > 0) {
+      if (vy < 0) vy = 0;
+      if (vy + vh > pageHmm) vy = Math.max(0, pageHmm - vh);
+      vh = Math.min(vh, pageHmm - vy);
+    }
+    return [vx, vy, Math.max(1, vw), Math.max(1, vh)];
   }
 
   function clearSliceImgStyles(img) {
@@ -895,10 +920,14 @@
     }
     const pos = rec.pos;
     const [x, y, w, h] = pos.map(Number);
+    const pageWmm = Number(student.width) || w;
+    const pageHmm = Number(student.height) || h;
+    const viewPos = expandViewPos(pos, pageWmm, pageHmm, SLICE_VIEW_SCALE);
+    const [vx, vy, vw, vh] = viewPos;
     const sources = sliceImageUrls(student);
     const pageImg = sources[0] || "";
     const useOss = supportsOssCrop(pageImg);
-    const imgUrl = useOss ? ossCrop(pageImg, pos) : pageImg;
+    const imgUrl = useOss ? ossCrop(pageImg, viewPos) : pageImg;
     const blanks = rec.blanks || [];
     const refLetters = String((blanks[0] && blanks[0].ref) || refText(question, 0) || "");
     let boxes = "";
@@ -907,10 +936,10 @@
       boxes = opts.map((opt, oi) => {
         const box = choiceOptionBox(opt, oi, opts.length, x, y, w, h);
         const [bx, by, bw, bh] = box;
-        const left = ((bx - x) / w) * 100;
-        const top = ((by - y) / h) * 100;
-        const width = (bw / w) * 100;
-        const height = (bh / h) * 100;
+        const left = ((bx - vx) / vw) * 100;
+        const top = ((by - vy) / vh) * 100;
+        const width = (bw / vw) * 100;
+        const height = (bh / vh) * 100;
         const filled = !!opt.fill;
         const isRef = refLetters.includes(opt.letter);
         let cls = " option";
@@ -924,10 +953,10 @@
       boxes = blanks.map((blank, i) => {
         if (!blank.pos || blank.pos.length < 4) return "";
         const [bx, by, bw, bh] = blank.pos;
-        const left = ((bx - x) / w) * 100;
-        const top = ((by - y) / h) * 100;
-        const width = (bw / w) * 100;
-        const height = (bh / h) * 100;
+        const left = ((bx - vx) / vw) * 100;
+        const top = ((by - vy) / vh) * 100;
+        const width = (bw / vw) * 100;
+        const height = (bh / vh) * 100;
         const on = state.blankIndex === i ? " on" : "";
         const dim = state.blankIndex >= 0 && state.blankIndex !== i ? " dim" : "";
         const cls = blank.right ? "" : " wrong";
@@ -935,7 +964,7 @@
       }).join("");
     }
 
-    board.style.aspectRatio = `${w} / ${h}`;
+    board.style.aspectRatio = `${vw} / ${vh}`;
     board.style.width = `${Math.round(state.zoom * 100)}%`;
     board.style.maxWidth = "640px";
     board.style.height = "auto";
@@ -946,7 +975,7 @@
       clearSliceImgStyles(img);
       img.classList.add("slice-img--fit");
     } else if (pageImg) {
-      applyPanCrop(img, student, pos);
+      applyPanCrop(img, student, viewPos);
     } else {
       clearSliceImgStyles(img);
     }
@@ -962,8 +991,8 @@
       const next = sources[step + 1];
       if (next && img.src !== next) {
         img.dataset.fallbackStep = String(step + 1);
-        img.src = supportsOssCrop(next) ? ossCrop(next, pos) : next;
-        if (!supportsOssCrop(next)) applyPanCrop(img, student, pos);
+        img.src = supportsOssCrop(next) ? ossCrop(next, viewPos) : next;
+        if (!supportsOssCrop(next)) applyPanCrop(img, student, viewPos);
         else {
           clearSliceImgStyles(img);
           img.classList.add("slice-img--fit");
@@ -977,7 +1006,7 @@
       if (!noteEl.textContent.startsWith("扫描图加载失败")) {
         noteEl.textContent = `第 ${student.page} 页 · 坐标系 ${Math.round(Number(student.width) || 0)}×${Math.round(Number(student.height) || 0)} mm`;
       }
-      if (!useOss && !img.classList.contains("slice-img--pan")) applyPanCrop(img, student, pos);
+      if (!useOss && !img.classList.contains("slice-img--pan")) applyPanCrop(img, student, viewPos);
     });
 
     origin.href = student.origin || student.image || "#";
@@ -1175,7 +1204,7 @@
       render();
     });
     $("zoomReset").addEventListener("click", () => {
-      state.zoom = 1;
+      state.zoom = 1.25;
       render();
     });
     $("pickFolderBtn").addEventListener("click", async () => {
