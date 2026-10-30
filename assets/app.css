@@ -462,6 +462,10 @@ body {
   font-size: 12px;
   margin-right: auto;
 }
+.slice-note.warn {
+  color: var(--bad);
+  font-weight: 600;
+}
 
 .result-toolbar {
   display: flex;
