@@ -13,13 +13,12 @@
     taskFilter: "all",
     query: "",
     blankIndex: 0,
-    zoom: 1.5,
+    zoom: 1.25,
   };
 
-  /** 切片视口：题框外扩比例 + 额外边距（mm），便于看全题面 */
-  const SLICE_VIEW_SCALE = 1.85;
-  const SLICE_VIEW_PAD_MM = 10;
-  const SLICE_ZOOM_DEFAULT = 1.5;
+  /** 以题面 pos 为基准，四周等距扩展（mm），不改变右侧列表布局 */
+  const SLICE_VIEW_PAD_MM = 12;
+  const SLICE_ZOOM_DEFAULT = 1.25;
 
   function examTypeLabel(type) {
     return type === "choice" ? "选择题" : "填空题";
@@ -510,26 +509,24 @@
     return urls;
   }
 
-  function expandViewPos(pos, pageWmm, pageHmm, scale, padMm) {
+  /** 题面矩形 pos 四边各加 padMm，贴页边时只裁掉超出部分，不整体平移视图 */
+  function expandViewPos(pos, pageWmm, pageHmm, padMm) {
     const [x, y, w, h] = pos.map(Number);
-    const factor = Math.max(1, Number(scale) || 1);
     const pad = Math.max(0, Number(padMm) || 0);
-    const cx = x + w / 2;
-    const cy = y + h / 2;
-    let vw = w * factor + pad * 2;
-    let vh = h * factor + pad * 2;
-    let vx = cx - vw / 2;
-    let vy = cy - vh / 2;
-    if (pageWmm > 0) {
-      if (vx < 0) vx = 0;
-      if (vx + vw > pageWmm) vx = Math.max(0, pageWmm - vw);
-      vw = Math.min(vw, pageWmm - vx);
+    let vx = x - pad;
+    let vy = y - pad;
+    let vw = w + pad * 2;
+    let vh = h + pad * 2;
+    if (vx < 0) {
+      vw += vx;
+      vx = 0;
     }
-    if (pageHmm > 0) {
-      if (vy < 0) vy = 0;
-      if (vy + vh > pageHmm) vy = Math.max(0, pageHmm - vh);
-      vh = Math.min(vh, pageHmm - vy);
+    if (vy < 0) {
+      vh += vy;
+      vy = 0;
     }
+    if (pageWmm > 0 && vx + vw > pageWmm) vw = pageWmm - vx;
+    if (pageHmm > 0 && vy + vh > pageHmm) vh = pageHmm - vy;
     return [vx, vy, Math.max(1, vw), Math.max(1, vh)];
   }
 
@@ -972,7 +969,7 @@
     const [x, y, w, h] = pos.map(Number);
     const pageWmm = Number(student.width) || w;
     const pageHmm = Number(student.height) || h;
-    const viewPos = expandViewPos(pos, pageWmm, pageHmm, SLICE_VIEW_SCALE, SLICE_VIEW_PAD_MM);
+    const viewPos = expandViewPos(pos, pageWmm, pageHmm, SLICE_VIEW_PAD_MM);
     const [vx, vy, vw, vh] = viewPos;
     const sources = sliceImageUrls(student);
     const pageImg = sources[0] || "";
@@ -1011,7 +1008,7 @@
 
     board.style.aspectRatio = `${vw} / ${vh}`;
     board.style.width = `${Math.round(state.zoom * 100)}%`;
-    board.style.maxWidth = "960px";
+    board.style.maxWidth = "640px";
     board.style.height = "auto";
     board.style.maxHeight = "none";
     board.innerHTML = `<img alt="第${question.no}题学生扫描切片" referrerpolicy="no-referrer" src="${imgUrl.replace(/"/g, "&quot;")}" /><div class="overlay">${boxes}</div>`;

@@ -293,7 +293,7 @@ body {
   flex: 1;
   min-height: 280px;
   display: grid;
-  grid-template-columns: minmax(0, 1.22fr) minmax(300px, 0.88fr);
+  grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.15fr);
   gap: 10px;
 }
 
@@ -382,7 +382,7 @@ body {
   box-shadow: 0 4px 16px rgba(22, 52, 44, 0.1);
   border-radius: 6px;
   overflow: hidden;
-  width: min(100%, 960px);
+  width: min(100%, 720px);
   height: auto;
 }
 .slice-board img {
