@@ -62,6 +62,10 @@ GitHub 仓库 → **Settings → Secrets and variables → Actions → New repos
 - 任意 push 到 `main`，或  
 - **Actions → Deploy Vercel → Run workflow**
 
+未配置上述三个 Secret 时，该 workflow **会自动跳过**（避免红叉误报）。
+
+若 Actions 里看到 **`You defined "--token", but it's missing a value`**，说明还没配 `VERCEL_TOKEN`（或名称拼写不对），按上表补全即可。
+
 成功后 Production 域名会指向最新构建。
 
 ---
