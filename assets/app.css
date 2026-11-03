@@ -135,6 +135,46 @@ body {
   color: var(--muted);
   font-size: 12px;
 }
+.folder-source-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  flex-basis: 100%;
+}
+.folder-source-chips:empty {
+  display: none;
+}
+.source-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 2px 8px 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: #f4f8f2;
+  font-size: 11px;
+  color: var(--ink);
+}
+.source-chip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.source-chip button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.source-chip button:hover {
+  color: var(--bad);
+}
 
 .q-strip {
   display: flex;

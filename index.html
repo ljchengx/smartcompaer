@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
-  <link rel="stylesheet" href="assets/app.css?v=33" />
+  <link rel="stylesheet" href="assets/app.css?v=34" />
 </head>
 <body>
   <div class="app" id="app">
@@ -20,6 +20,7 @@
           <button type="button" data-type="short">简答题</button>
         </div>
         <button type="button" class="folder-btn" id="pickFolderBtn">选择文件夹</button>
+        <button type="button" class="text-btn" id="addCompareFolderBtn" disabled title="再选一个目录，与已加载数据对比">添加对比目录</button>
         <button type="button" class="text-btn" id="reloadBtn" disabled>重新读取</button>
         <button type="button" class="text-btn" id="exportBtn" disabled>导出正确率</button>
         <input id="folderInput" type="file" webkitdirectory multiple accept=".json,application/json" hidden />
@@ -29,7 +30,8 @@
             <option value="all">全部任务</option>
           </select>
         </label>
-        <p class="folder-meta" id="folderMeta">先选题型，再选择考试日期目录（可含多个任务）</p>
+        <div class="folder-source-chips" id="folderSourceChips"></div>
+        <p class="folder-meta" id="folderMeta">先选题型，再选择目录；简答题可点「添加对比目录」选多个文件夹</p>
       </div>
       <div class="q-strip">
         <div class="q-badge" id="qBadge">—</div>
@@ -130,6 +132,6 @@
     </main>
   </div>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script defer src="assets/app.js?v=33"></script>
+  <script defer src="assets/app.js?v=35"></script>
 </body>
 </html>

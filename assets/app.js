@@ -17,7 +17,10 @@
     blankIndex: 0,
     zoom: 1.25,
     compareTasks: new Set(),
+    folderPickAppend: false,
   };
+
+  let folderSourceSeq = 0;
 
   /** 以题面 pos 为基准，四周等距扩展（mm），不改变右侧列表布局 */
   const SLICE_VIEW_PAD_MM = 12;
@@ -291,13 +294,16 @@
     return fallback || "";
   }
 
-  function studentFromRec(rec, relPath) {
+  function studentFromRec(rec, relPath, sourceMeta) {
+    const meta = sourceMeta || {};
+    const sourceId = meta.sourceId || "";
+    const sourceName = meta.sourceName || "";
     const path = String(relPath || "").replace(/\\/g, "/");
     const file = path.split("/").pop() || path;
     const fromJson = rec.pre_task_id || String(rec.task_id || "").split("_")[0] || "";
     const taskId = fromJson || taskFolderFromPath(path, "");
     const taskFolder = taskFolderFromPath(path, taskId) || taskId;
-    const key = `${taskId || taskFolder || "task"}::${file}::${rec.stu_no || rec.student_id || rec.stuScanId || ""}`;
+    const key = `${sourceId || "s0"}::${taskId || taskFolder || "task"}::${file}::${rec.stu_no || rec.student_id || rec.stuScanId || ""}`;
     const taskIdRaw = rec.task_id || rec.pre_task_id || "";
     const idx = rec.idx != null ? rec.idx : (rec.idx_num != null ? rec.idx_num : null);
     return {
@@ -316,9 +322,23 @@
       path,
       taskId,
       taskFolder,
+      sourceId,
+      sourceName,
       qs: extractQs(rec),
       examId: rec.exam_id || "",
     };
+  }
+
+  function newFolderSourceId() {
+    folderSourceSeq += 1;
+    return `folder-${folderSourceSeq}`;
+  }
+
+  function shortFolderLabel(name) {
+    const text = String(name || "").trim();
+    if (!text) return "目录";
+    if (text.length <= 14) return text;
+    return "…" + text.slice(-13);
   }
 
   function buildQuestions(students) {
@@ -367,11 +387,8 @@
     return Object.values(meta).sort((a, b) => a.no - b.no);
   }
 
-  const folderSource = {
-    name: "",
-    handle: null,
-    files: [],
-  };
+  /** @type {{ id: string, name: string, handle: FileSystemDirectoryHandle|null, files: File[] }[]} */
+  const folderSources = [];
 
   function isStudentRec(rec) {
     if (!rec || typeof rec !== "object") return false;
@@ -397,15 +414,39 @@
   }
 
   function buildSeries(students) {
+    if (folderSources.length > 1) {
+      return folderSources.map((src, i) => {
+        const list = students.filter((s) => s.sourceId === src.id);
+        return {
+          id: src.id,
+          label: shortFolderLabel(src.name),
+          fullLabel: src.name,
+          count: list.length,
+          colorIndex: i,
+          students: list,
+        };
+      });
+    }
     const tasks = taskListOf(students);
     if (!tasks.length) {
-      return [{ id: "all", label: "全部", students }];
+      return [{ id: "all", label: "全部", students, colorIndex: 0 }];
     }
-    return tasks.map((t) => ({
+    if (tasks.length === 1) {
+      return [{
+        id: tasks[0].id,
+        label: shortTask(tasks[0].id),
+        fullLabel: tasks[0].id,
+        count: tasks[0].count,
+        colorIndex: 0,
+        students,
+      }];
+    }
+    return tasks.map((t, i) => ({
       id: t.id,
       label: shortTask(t.id),
       fullLabel: t.id,
       count: t.count,
+      colorIndex: i,
       students: students.filter((s) => (s.taskFolder || s.taskId || "") === t.id),
     }));
   }
@@ -437,25 +478,35 @@
       students,
       series: buildSeries(students),
       tasks,
+      sources: folderSources.map((s) => ({ id: s.id, name: s.name })),
       loadedAt: new Date(),
       folderName: folderName || "",
     };
     state.compareTasks = new Set((window.EXAM_DATA.series || []).map((s) => s.id));
-    const taskText = tasks.length > 1 ? ` · ${tasks.length} 个任务` : tasks.length === 1 ? ` · 任务 ${tasks[0].id.slice(0, 8)}…` : "";
+    const multiFolder = folderSources.length > 1;
+    const taskText = multiFolder
+      ? ` · ${folderSources.length} 个对比目录`
+      : tasks.length > 1
+        ? ` · ${tasks.length} 个任务`
+        : tasks.length === 1
+          ? ` · 任务 ${tasks[0].id.slice(0, 8)}…`
+          : "";
     $("folderMeta").textContent = students.length
       ? `${folderName}${taskText} · ${students.length} 份 JSON`
       : `${folderName || "已选文件夹"} · 没有可解析的学生 JSON`;
-    $("reloadBtn").disabled = !folderSource.handle && !folderSource.files.length;
+    $("reloadBtn").disabled = !folderSources.length;
+    updateCompareFolderBtn(students.length);
     if ($("exportBtn")) $("exportBtn").disabled = !students.length;
     if (state.qIndex >= window.EXAM_DATA.questions.length) state.qIndex = 0;
     renderTaskFilter();
+    renderFolderSourceChips();
   }
 
-  function parseJsonFile(file, relPath) {
+  function parseJsonFile(file, relPath, sourceMeta) {
     return file.text().then((text) => {
       const rec = JSON.parse(text);
       if (!isStudentRec(rec)) return null;
-      return studentFromRec(rec, relPath);
+      return studentFromRec(rec, relPath, sourceMeta);
     }).catch(() => null);
   }
 
@@ -473,7 +524,7 @@
     return items;
   }
 
-  async function loadFromDirectoryHandle(dirHandle) {
+  async function loadRecsFromDirectoryHandle(dirHandle, sourceMeta) {
     const perm = await dirHandle.queryPermission({ mode: "read" });
     if (perm !== "granted") {
       const next = await dirHandle.requestPermission({ mode: "read" });
@@ -483,14 +534,12 @@
     items.sort((a, b) => a.path.localeCompare(b.path, "en", { numeric: true }));
     let recs = (await Promise.all(items.map(async (item) => {
       const file = await item.handle.getFile();
-      return parseJsonFile(file, item.path);
+      return parseJsonFile(file, item.path, sourceMeta);
     }))).filter(Boolean);
-    recs = recs.filter(hasParsedQuestions);
-    if (!recs.length) throw new Error(`文件夹里没有可解析的${examTypeLabel(state.examType)} JSON`);
-    applyStudents(recs, dirHandle.name);
+    return recs.filter(hasParsedQuestions);
   }
 
-  async function loadFromFileList(fileList) {
+  async function loadRecsFromFileList(fileList, sourceMeta) {
     const files = Array.from(fileList || []).filter((file) => {
       const name = (file.webkitRelativePath || file.name).replace(/\\/g, "/");
       const base = name.split("/").pop();
@@ -501,38 +550,82 @@
       const rel = (file.webkitRelativePath || file.name).replace(/\\/g, "/");
       const parts = rel.split("/");
       const path = parts.length > 1 ? parts.slice(1).join("/") : rel;
-      return parseJsonFile(file, path);
+      return parseJsonFile(file, path, sourceMeta);
     }))).filter(Boolean);
-    recs = recs.filter(hasParsedQuestions);
-    const folderName = files[0] && files[0].webkitRelativePath
-      ? files[0].webkitRelativePath.split(/[\\/]/)[0]
-      : (folderSource.name || "已选文件夹");
-    if (!recs.length) throw new Error(`文件夹里没有可解析的${examTypeLabel(state.examType)} JSON`);
-    applyStudents(recs, folderName);
+    return recs.filter(hasParsedQuestions);
+  }
+
+  async function loadAllFolderSources() {
+    if (!folderSources.length) throw new Error("请先选择文件夹");
+    const batches = [];
+    for (const src of folderSources) {
+      const meta = { sourceId: src.id, sourceName: src.name };
+      let recs = [];
+      if (src.handle) recs = await loadRecsFromDirectoryHandle(src.handle, meta);
+      else if (src.files && src.files.length) recs = await loadRecsFromFileList(src.files, meta);
+      if (!recs.length) {
+        throw new Error(`「${src.name}」里没有可解析的${examTypeLabel(state.examType)} JSON`);
+      }
+      batches.push(...recs);
+    }
+    const folderName = folderSources.map((s) => s.name).join(" · ");
+    applyStudents(batches, folderName);
   }
 
   async function loadFolderData() {
-    if (folderSource.handle) {
-      await loadFromDirectoryHandle(folderSource.handle);
-      return;
-    }
-    if (folderSource.files.length) {
-      await loadFromFileList(folderSource.files);
-      return;
-    }
-    throw new Error("请先选择文件夹");
+    await loadAllFolderSources();
   }
 
-  async function pickFolder() {
+  async function pickFolder({ append = false } = {}) {
     if (window.showDirectoryPicker) {
       const handle = await window.showDirectoryPicker({ mode: "read" });
-      folderSource.handle = handle;
-      folderSource.files = [];
-      folderSource.name = handle.name;
-      await loadFromDirectoryHandle(handle);
+      if (!append) folderSources.length = 0;
+      folderSources.push({
+        id: newFolderSourceId(),
+        name: handle.name,
+        handle,
+        files: [],
+      });
+      await loadAllFolderSources();
       return;
     }
+    state.folderPickAppend = append;
     $("folderInput").click();
+  }
+
+  async function pickCompareFolder() {
+    await pickFolder({ append: true });
+  }
+
+  function removeFolderSource(id) {
+    const idx = folderSources.findIndex((s) => s.id === id);
+    if (idx < 0) return;
+    folderSources.splice(idx, 1);
+    if (!folderSources.length) {
+      window.EXAM_DATA = { examId: "", taskId: "", examType: state.examType, dpi: DPI, questions: [], students: [] };
+      renderEmpty();
+      return;
+    }
+    loadAllFolderSources().then(render).catch((err) => {
+      console.error(err);
+      $("folderMeta").textContent = "读取失败：" + (err.message || err);
+    });
+  }
+
+  function renderFolderSourceChips() {
+    const root = $("folderSourceChips");
+    if (!root) return;
+    if (!folderSources.length) {
+      root.innerHTML = "";
+      return;
+    }
+    root.innerHTML = folderSources.map((src, i) => `
+      <span class="source-chip">
+        <i style="background:${seriesColor(i)}"></i>
+        <span title="${escapeHtml(src.name)}">${escapeHtml(shortFolderLabel(src.name))}</span>
+        <button type="button" data-remove-source="${escapeHtml(src.id)}" aria-label="移除">×</button>
+      </span>
+    `).join("");
   }
 
   function ossCrop(url, pos) {
@@ -925,7 +1018,7 @@
 
   function filteredSeries() {
     let series = window.EXAM_DATA.series || [];
-    if (state.taskFilter !== "all") {
+    if (folderSources.length <= 1 && state.taskFilter !== "all") {
       series = series.filter((s) => s.id === state.taskFilter);
     }
     if (state.compareTasks.size) {
@@ -935,6 +1028,8 @@
   }
 
   function seriesColorById(id) {
+    const hit = (window.EXAM_DATA.series || []).find((s) => s.id === id);
+    if (hit && hit.colorIndex != null) return seriesColor(hit.colorIndex);
     const idx = (window.EXAM_DATA.series || []).findIndex((s) => s.id === id);
     return seriesColor(idx >= 0 ? idx : 0);
   }
@@ -1001,7 +1096,8 @@
     }
     root.innerHTML = series.map((s, i) => {
       const on = state.compareTasks.has(s.id);
-      return `<label><input type="checkbox" data-series="${escapeHtml(s.id)}"${on ? " checked" : ""} /><i style="background:${seriesColor(i)}"></i>${escapeHtml(s.label)}<span class="muted">(${s.count || s.students.length})</span></label>`;
+      const ci = s.colorIndex != null ? s.colorIndex : i;
+      return `<label><input type="checkbox" data-series="${escapeHtml(s.id)}"${on ? " checked" : ""} /><i style="background:${seriesColor(ci)}"></i>${escapeHtml(s.label)}<span class="muted">(${s.count || s.students.length})</span></label>`;
     }).join("");
   }
 
@@ -1010,7 +1106,7 @@
     if (!host) return;
     const series = filteredSeries();
     if (!series.length) {
-      host.innerHTML = `<div class="empty-slice">请选择至少一个对比任务</div>`;
+      host.innerHTML = `<div class="empty-slice">请选择至少一个对比${folderSources.length > 1 ? "目录" : "任务"}</div>`;
       return;
     }
     const total = question.totalScore || 1;
@@ -1045,7 +1141,8 @@
     parts.push("</svg>");
     host.innerHTML = parts.join("");
     if ($("chartSub")) {
-      $("chartSub").textContent = `第 ${question.no} 题 · 满分 ${total} · ${series.length} 个任务对比`;
+      const scope = folderSources.length > 1 ? "目录" : "任务";
+      $("chartSub").textContent = `第 ${question.no} 题 · 满分 ${total} · ${series.length} 个${scope}对比`;
     }
   }
 
@@ -1099,7 +1196,12 @@
     }
     sel.innerHTML = opts.join("");
     sel.value = state.taskFilter;
-    sel.disabled = tasks.length <= 1;
+    sel.disabled = tasks.length <= 1 || folderSources.length > 1;
+    if (folderSources.length > 1) {
+      sel.title = "多目录对比时请在图表上方勾选目录";
+    } else {
+      sel.removeAttribute("title");
+    }
   }
 
   function renderNav() {
@@ -1370,6 +1472,9 @@
     $("sliceWho").textContent = "未选学生";
     $("sliceNote").textContent = "";
     if ($("exportBtn")) $("exportBtn").disabled = true;
+    updateCompareFolderBtn(false);
+    if ($("reloadBtn")) $("reloadBtn").disabled = true;
+    renderFolderSourceChips();
     updateCopyMetaBtn(null);
     $("stuHead").innerHTML = "";
     $("stuBody").innerHTML = "";
@@ -1380,12 +1485,20 @@
     if ($("compareStats")) $("compareStats").innerHTML = "";
   }
 
+  function updateCompareFolderBtn(hasStudents) {
+    const btn = $("addCompareFolderBtn");
+    if (!btn) return;
+    btn.disabled = !hasStudents || state.examType !== "short";
+    btn.hidden = state.examType !== "short";
+  }
+
   function syncExamTypeSwitch() {
     const root = $("examTypeSwitch");
     if (!root) return;
     for (const btn of root.querySelectorAll("[data-type]")) {
       btn.classList.toggle("on", btn.dataset.type === state.examType);
     }
+    updateCompareFolderBtn((window.EXAM_DATA.students || []).length > 0);
   }
 
   function render() {
@@ -1431,7 +1544,8 @@
         el.classList.toggle("on", el.dataset.filter === "all");
       }
       syncExamTypeSwitch();
-      if (folderSource.handle || folderSource.files.length) {
+      folderSources.length = 0;
+      if (folderSources.length) {
         await refreshLive();
       } else {
         renderEmpty();
@@ -1507,7 +1621,7 @@
     });
     $("pickFolderBtn").addEventListener("click", async () => {
       try {
-        await pickFolder();
+        await pickFolder({ append: false });
         render();
       } catch (err) {
         if (err && err.name === "AbortError") return;
@@ -1515,21 +1629,44 @@
         $("folderMeta").textContent = "读取失败：" + (err.message || err);
       }
     });
+    $("addCompareFolderBtn").addEventListener("click", async () => {
+      try {
+        await pickCompareFolder();
+        render();
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        console.error(err);
+        $("folderMeta").textContent = "读取失败：" + (err.message || err);
+      }
+    });
+    $("folderSourceChips").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-remove-source]");
+      if (!btn) return;
+      removeFolderSource(btn.dataset.removeSource);
+    });
     $("folderInput").addEventListener("change", async (e) => {
       const files = Array.from(e.target.files || []);
       if (!files.length) return;
-      folderSource.handle = null;
-      folderSource.files = files;
-      folderSource.name = files[0].webkitRelativePath
+      const append = state.folderPickAppend;
+      if (!append) folderSources.length = 0;
+      const name = files[0].webkitRelativePath
         ? files[0].webkitRelativePath.split(/[\\/]/)[0]
         : "已选文件夹";
+      folderSources.push({
+        id: newFolderSourceId(),
+        name,
+        handle: null,
+        files,
+      });
+      state.folderPickAppend = false;
       try {
-        await loadFromFileList(files);
+        await loadAllFolderSources();
         render();
       } catch (err) {
         console.error(err);
         $("folderMeta").textContent = "读取失败：" + (err.message || err);
       }
+      e.target.value = "";
     });
     $("reloadBtn").addEventListener("click", () => {
       refreshLive();
@@ -1565,7 +1702,7 @@
   let loading = false;
   async function refreshLive() {
     if (loading) return;
-    if (!folderSource.handle && !folderSource.files.length) {
+    if (!folderSources.length) {
       renderEmpty();
       return;
     }
@@ -1584,10 +1721,11 @@
     } finally {
       loading = false;
       if (btn) {
-        btn.disabled = !folderSource.handle && !folderSource.files.length;
+        btn.disabled = !folderSources.length;
         btn.textContent = "重新读取";
       }
       if ($("exportBtn")) $("exportBtn").disabled = !(window.EXAM_DATA.students || []).length;
+      updateCompareFolderBtn((window.EXAM_DATA.students || []).length > 0);
     }
   }
 
