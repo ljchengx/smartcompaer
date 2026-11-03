@@ -336,6 +336,10 @@ body {
   grid-template-columns: minmax(0, 0.95fr) minmax(320px, 1.15fr);
   gap: 10px;
 }
+#detailWorkspace[hidden],
+#shortWorkspace[hidden] {
+  display: none !important;
+}
 
 .panel {
   border-radius: 16px;

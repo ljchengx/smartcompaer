@@ -246,6 +246,23 @@
           });
           if (pos.length === 4) posBoxes.push(pos);
         }
+        if (!(seg.score_list || []).length) {
+          const totalB = Number(seg.total_score || 0);
+          if (totalB > 0) {
+            const scoreB = Number(seg.score || 0);
+            const pos = seg.pos && seg.pos.length >= 4 ? seg.pos.slice(0, 4) : [];
+            blanks.push({
+              pos,
+              right: scoreB >= totalB - 0.001,
+              score: scoreB,
+              total: totalB,
+              user: seg.user_answer || "",
+              ref: "",
+              refImg: "",
+            });
+            if (pos.length === 4) posBoxes.push(pos);
+          }
+        }
       }
       const pos = inflatePos(unionPos(posBoxes) || [0, 0, pageW, pageH], 2, pageW, pageH);
       qs[qno] = { score: Math.round(score * 100) / 100, total: Math.round(total * 100) / 100, pos, blanks };
@@ -414,15 +431,26 @@
     }
   }
 
+  /** 线上导出常把 ai_mode 题放在 questions，ai_questions 为空 */
+  function syncAiQuestionsFromQuestions(r) {
+    const list = Array.isArray(r.questions) ? r.questions : [];
+    const ai = Array.isArray(r.ai_questions) ? r.ai_questions : [];
+    if (ai.length) return;
+    const picked = list.filter((q) => q && (Number(q.ai_mode) === 1 || Number(q.ai_mode) === 2));
+    if (picked.length) r.ai_questions = picked;
+  }
+
   /** Mongo / MySQL 导出：内嵌 JSON 字符串、Extended JSON 数字 */
   function normalizeStudentRec(rec) {
     if (!rec || typeof rec !== "object" || Array.isArray(rec)) return rec;
     const r = unwrapExtendedJson(rec);
     r.questions = parseEmbeddedJsonField(r.questions);
     r.ai_questions = parseEmbeddedJsonField(r.ai_questions);
+    if (r.ai_questions == null) r.ai_questions = [];
     if (r.stu_no_detect != null) r.stu_no_detect = parseEmbeddedJsonField(r.stu_no_detect);
     if (Array.isArray(r.ai_questions)) r.ai_questions = unwrapExtendedJson(r.ai_questions);
     if (Array.isArray(r.questions)) r.questions = unwrapExtendedJson(r.questions);
+    syncAiQuestionsFromQuestions(r);
     return r;
   }
 
@@ -505,7 +533,8 @@
       .sort((a, b) => a.id.localeCompare(b.id, "en", { numeric: true }));
   }
 
-  function applyStudents(recs, folderName) {
+  function applyStudents(recs, folderName, opts) {
+    const loadOpts = opts || {};
     const students = sortStudents(recs);
     const tasks = taskListOf(students);
     if (state.taskFilter !== "all" && !tasks.some((t) => t.id === state.taskFilter)) {
@@ -525,7 +554,7 @@
       folderName: folderName || "",
     };
     state.compareTasks = new Set((window.EXAM_DATA.series || []).map((s) => s.id));
-    const multiFolder = folderSources.length > 1;
+    const multiFolder = state.examType === "short" && folderSources.length > 1;
     const taskText = multiFolder
       ? ` · ${folderSources.length} 个对比目录`
       : tasks.length > 1
@@ -533,9 +562,10 @@
         : tasks.length === 1
           ? ` · 任务 ${tasks[0].id.slice(0, 8)}…`
           : "";
+    const skipHint = loadOpts.extraSourcesSkipped ? " · 多目录对比仅简答题，已忽略其余目录" : "";
     $("folderMeta").textContent = students.length
-      ? `${folderName}${taskText} · ${students.length} 份 JSON`
-      : `${folderName || "已选文件夹"} · 没有可解析的学生 JSON`;
+      ? `${folderName}${taskText}${skipHint} · ${students.length} 份 JSON`
+      : `${folderName || "已选文件夹"} · 没有可解析的${examTypeLabel(state.examType)} JSON`;
     $("reloadBtn").disabled = !folderSources.length;
     updateCompareFolderBtn(students.length);
     if ($("exportBtn")) $("exportBtn").disabled = !students.length;
@@ -613,8 +643,11 @@
 
   async function loadAllFolderSources() {
     if (!folderSources.length) throw new Error("请先选择文件夹");
+    const sources = state.examType === "short"
+      ? folderSources
+      : folderSources.slice(0, 1);
     const batches = [];
-    for (const src of folderSources) {
+    for (const src of sources) {
       const meta = { sourceId: src.id, sourceName: src.name };
       let recs = [];
       if (src.bundleFile) recs = await loadRecsFromJsonBundle(src.bundleFile, meta);
@@ -625,8 +658,10 @@
       }
       batches.push(...recs);
     }
-    const folderName = folderSources.map((s) => s.name).join(" · ");
-    applyStudents(batches, folderName);
+    const folderName = sources.map((s) => s.name).join(" · ");
+    applyStudents(batches, folderName, {
+      extraSourcesSkipped: state.examType !== "short" && folderSources.length > 1,
+    });
   }
 
   async function loadFolderData() {
@@ -674,6 +709,7 @@
   }
 
   async function pickCompareFolder() {
+    if (state.examType !== "short") return;
     await pickFolder({ append: true });
   }
 
@@ -695,10 +731,12 @@
   function renderFolderSourceChips() {
     const root = $("folderSourceChips");
     if (!root) return;
-    if (!folderSources.length) {
+    if (state.examType !== "short" || !folderSources.length) {
       root.innerHTML = "";
+      root.hidden = true;
       return;
     }
+    root.hidden = false;
     root.innerHTML = folderSources.map((src, i) => `
       <span class="source-chip">
         <i style="background:${seriesColor(i)}"></i>
@@ -1094,6 +1132,11 @@
     if (detail) detail.hidden = short;
     if (sw) sw.hidden = !short;
     document.getElementById("app")?.classList.toggle("mode-short", short);
+    if (!short) {
+      if ($("seriesPick")) $("seriesPick").innerHTML = "";
+      if ($("scoreChart")) $("scoreChart").innerHTML = "";
+      if ($("compareStats")) $("compareStats").innerHTML = "";
+    }
   }
 
   function filteredSeries() {
