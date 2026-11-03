@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
-  <link rel="stylesheet" href="assets/app.css?v=32" />
+  <link rel="stylesheet" href="assets/app.css?v=33" />
 </head>
 <body>
   <div class="app" id="app">
@@ -17,6 +17,7 @@
         <div class="type-switch seg" id="examTypeSwitch" role="group" aria-label="题型">
           <button type="button" data-type="fill" class="on">填空题</button>
           <button type="button" data-type="choice">选择题</button>
+          <button type="button" data-type="short">简答题</button>
         </div>
         <button type="button" class="folder-btn" id="pickFolderBtn">选择文件夹</button>
         <button type="button" class="text-btn" id="reloadBtn" disabled>重新读取</button>
@@ -53,7 +54,7 @@
     </aside>
 
     <main class="main">
-      <section class="workspace">
+      <section class="workspace" id="detailWorkspace">
         <article class="panel slice-panel">
           <div class="panel-head compact">
             <div class="slice-who" id="sliceWho">未选学生</div>
@@ -108,10 +109,27 @@
         </article>
       </section>
 
+      <section class="workspace workspace--short" id="shortWorkspace" hidden>
+        <article class="panel chart-panel">
+          <div class="panel-head compact">
+            <div>
+              <div class="kicker">得分分布</div>
+              <p class="chart-sub" id="chartSub">选择题目查看各任务得分分布</p>
+            </div>
+            <div class="series-pick" id="seriesPick"></div>
+          </div>
+          <div class="score-chart" id="scoreChart"></div>
+        </article>
+        <article class="panel compare-panel">
+          <h3 class="compare-title">任务 / 模型对比</h3>
+          <div class="compare-table-wrap" id="compareStats"></div>
+        </article>
+      </section>
+
       <footer class="foot" id="foot"></footer>
     </main>
   </div>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script defer src="assets/app.js?v=32"></script>
+  <script defer src="assets/app.js?v=33"></script>
 </body>
 </html>

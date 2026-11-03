@@ -5,6 +5,8 @@
 
   const OPTION_LABELS = "ABCDEFGH".split("");
 
+  const SERIES_COLORS = ["#17362d", "#2563eb", "#b9892d", "#8b5cf6", "#d4523e", "#0891b2"];
+
   const state = {
     examType: "fill",
     qIndex: 0,
@@ -14,6 +16,7 @@
     query: "",
     blankIndex: 0,
     zoom: 1.25,
+    compareTasks: new Set(),
   };
 
   /** 以题面 pos 为基准，四周等距扩展（mm），不改变右侧列表布局 */
@@ -21,7 +24,9 @@
   const SLICE_ZOOM_DEFAULT = 1.25;
 
   function examTypeLabel(type) {
-    return type === "choice" ? "选择题" : "填空题";
+    if (type === "choice") return "选择题";
+    if (type === "short") return "简答题";
+    return "填空题";
   }
 
   function answerIntToLetters(n) {
@@ -244,8 +249,32 @@
     return qs;
   }
 
+  function extractQsShort(rec) {
+    const pageW = Number(rec.width || 0);
+    const pageH = Number(rec.height || 0);
+    const qs = {};
+    for (const q of rec.ai_questions || []) {
+      if (q.ai_mode !== 2) continue;
+      const total = Number(q.total_score || 0);
+      if (total <= 0) continue;
+      const qno = String(q.question_no || 0);
+      if (!qno || qno === "0") continue;
+      const score = Number(q.score || 0);
+      const pos = q.pos && q.pos.length >= 4 ? q.pos : null;
+      qs[qno] = {
+        score: Math.round(score * 100) / 100,
+        total: Math.round(total * 100) / 100,
+        pos: pos || [0, 0, pageW, pageH],
+        correctModel: q.correct_model,
+        questionType: q.question_type,
+      };
+    }
+    return qs;
+  }
+
   function extractQs(rec) {
     if (state.examType === "choice") return extractQsChoice(rec);
+    if (state.examType === "short") return extractQsShort(rec);
     return extractQsFill(rec);
   }
 
@@ -301,8 +330,8 @@
           meta[qno] = {
             no: Number(qno),
             id: "",
-            type: state.examType === "choice" ? 8 : 3,
-            aiMode: state.examType === "choice" ? 0 : 1,
+            type: state.examType === "choice" ? 8 : (state.examType === "short" ? 6 : 3),
+            aiMode: state.examType === "choice" ? 0 : (state.examType === "short" ? 2 : 1),
             label: typeLabel,
             blankCount: 0,
             optionCount: 0,
@@ -316,6 +345,8 @@
         if (state.examType === "choice") {
           meta[qno].blankCount = 0;
           meta[qno].optionCount = Math.max(meta[qno].optionCount, (rec.options || []).length);
+        } else if (state.examType === "short") {
+          meta[qno].blankCount = 0;
         } else {
           meta[qno].blankCount = Math.max(meta[qno].blankCount, blanks.length);
         }
@@ -346,6 +377,9 @@
     if (!rec || typeof rec !== "object") return false;
     if (rec.stu_no != null || rec.student_id != null) return true;
     if (state.examType === "choice") return Array.isArray(rec.questions);
+    if (state.examType === "short") {
+      return Array.isArray(rec.ai_questions) && (rec.ai_questions || []).some((q) => q.ai_mode === 2);
+    }
     return Array.isArray(rec.ai_questions);
   }
 
@@ -360,6 +394,20 @@
       if (ta !== tb) return ta.localeCompare(tb, "en", { numeric: true });
       return String(a.file || "").localeCompare(String(b.file || ""), "en", { numeric: true });
     });
+  }
+
+  function buildSeries(students) {
+    const tasks = taskListOf(students);
+    if (!tasks.length) {
+      return [{ id: "all", label: "全部", students }];
+    }
+    return tasks.map((t) => ({
+      id: t.id,
+      label: shortTask(t.id),
+      fullLabel: t.id,
+      count: t.count,
+      students: students.filter((s) => (s.taskFolder || s.taskId || "") === t.id),
+    }));
   }
 
   function taskListOf(students) {
@@ -387,10 +435,12 @@
       dpi: DPI,
       questions: buildQuestions(students),
       students,
+      series: buildSeries(students),
       tasks,
       loadedAt: new Date(),
       folderName: folderName || "",
     };
+    state.compareTasks = new Set((window.EXAM_DATA.series || []).map((s) => s.id));
     const taskText = tasks.length > 1 ? ` · ${tasks.length} 个任务` : tasks.length === 1 ? ` · 任务 ${tasks[0].id.slice(0, 8)}…` : "";
     $("folderMeta").textContent = students.length
       ? `${folderName}${taskText} · ${students.length} 份 JSON`
@@ -597,9 +647,17 @@
     let full = 0;
     let blankRight = 0;
     let blankTotal = 0;
+    let scoreSum = 0;
+    let scoreN = 0;
     for (const stu of students) {
       const rec = recOf(stu, question);
       if (!rec) continue;
+      if (state.examType === "short") {
+        scoreSum += Number(rec.score || 0);
+        scoreN += 1;
+        if (Number(rec.score) >= Number(rec.total) - 0.001) full += 1;
+        continue;
+      }
       const blanks = rec.blanks || [];
       if (blanks.length > 0 && blanks.every((b) => b.right)) full += 1;
       blankRight += blanks.filter((b) => b.right).length;
@@ -611,6 +669,7 @@
       total,
       studentRate: total ? full / total : 0,
       blankRate: blankTotal ? blankRight / blankTotal : 0,
+      avgScore: scoreN ? scoreSum / scoreN : 0,
     };
   }
 
@@ -845,10 +904,189 @@
   function updateCopyMetaBtn(student) {
     const btn = $("copyMetaBtn");
     if (!btn) return;
+    if (state.examType === "short") {
+      btn.disabled = true;
+      return;
+    }
     btn.disabled = !student;
     btn.title = student
       ? `复制 task_id 与 idx（${student.stuNo || "当前学生"}）`
       : "请先选中一名学生";
+  }
+
+  function syncWorkspaceMode() {
+    const short = state.examType === "short";
+    const detail = $("detailWorkspace");
+    const sw = $("shortWorkspace");
+    if (detail) detail.hidden = short;
+    if (sw) sw.hidden = !short;
+    document.getElementById("app")?.classList.toggle("mode-short", short);
+  }
+
+  function filteredSeries() {
+    let series = window.EXAM_DATA.series || [];
+    if (state.taskFilter !== "all") {
+      series = series.filter((s) => s.id === state.taskFilter);
+    }
+    if (state.compareTasks.size) {
+      series = series.filter((s) => state.compareTasks.has(s.id));
+    }
+    return series;
+  }
+
+  function seriesColorById(id) {
+    const idx = (window.EXAM_DATA.series || []).findIndex((s) => s.id === id);
+    return seriesColor(idx >= 0 ? idx : 0);
+  }
+
+  function scoresForQuestion(students, question) {
+    const out = [];
+    for (const stu of students) {
+      const rec = recOf(stu, question);
+      if (!rec) continue;
+      out.push(Number(rec.score));
+    }
+    return out;
+  }
+
+  function scoreStep(scores) {
+    for (const s of scores) {
+      if (Math.abs(s - Math.round(s)) > 0.001) return 0.5;
+    }
+    return 1;
+  }
+
+  function scoreBins(scores, total) {
+    const step = scoreStep(scores);
+    const max = Math.ceil(total / step) * step;
+    const bins = [];
+    for (let v = 0; v <= max + 0.001; v += step) {
+      bins.push(Math.round(v * 100) / 100);
+    }
+    const counts = new Map(bins.map((b) => [b, 0]));
+    for (const s of scores) {
+      const key = Math.round(s / step) * step;
+      const k = Math.round(key * 100) / 100;
+      if (counts.has(k)) counts.set(k, counts.get(k) + 1);
+      else counts.set(k, 1);
+    }
+    return { step, bins: Array.from(counts.keys()).sort((a, b) => a - b), counts };
+  }
+
+  function seriesColor(i) {
+    return SERIES_COLORS[i % SERIES_COLORS.length];
+  }
+
+  function mean(nums) {
+    if (!nums.length) return 0;
+    return nums.reduce((a, b) => a + b, 0) / nums.length;
+  }
+
+  function median(nums) {
+    if (!nums.length) return 0;
+    const arr = nums.slice().sort((a, b) => a - b);
+    const m = Math.floor(arr.length / 2);
+    return arr.length % 2 ? arr[m] : (arr[m - 1] + arr[m]) / 2;
+  }
+
+  function renderSeriesPick() {
+    const root = $("seriesPick");
+    if (!root) return;
+    const series = window.EXAM_DATA.series || [];
+    if (series.length <= 1) {
+      root.innerHTML = series.length
+        ? `<span class="chart-sub">${escapeHtml(series[0].fullLabel || series[0].label)} · ${series[0].count || series[0].students.length} 份</span>`
+        : "";
+      return;
+    }
+    root.innerHTML = series.map((s, i) => {
+      const on = state.compareTasks.has(s.id);
+      return `<label><input type="checkbox" data-series="${escapeHtml(s.id)}"${on ? " checked" : ""} /><i style="background:${seriesColor(i)}"></i>${escapeHtml(s.label)}<span class="muted">(${s.count || s.students.length})</span></label>`;
+    }).join("");
+  }
+
+  function renderScoreChart(question) {
+    const host = $("scoreChart");
+    if (!host) return;
+    const series = filteredSeries();
+    if (!series.length) {
+      host.innerHTML = `<div class="empty-slice">请选择至少一个对比任务</div>`;
+      return;
+    }
+    const total = question.totalScore || 1;
+    const allScores = series.flatMap((s) => scoresForQuestion(s.students, question));
+    const { bins } = scoreBins(allScores, total);
+    const maxCount = Math.max(1, ...series.flatMap((s) => {
+      const { counts } = scoreBins(scoresForQuestion(s.students, question), total);
+      return Array.from(counts.values());
+    }));
+    const barGap = 4;
+    const groupW = Math.max(28, Math.min(48, Math.floor(600 / Math.max(bins.length, 1))));
+    const barW = Math.max(6, (groupW - barGap * (series.length - 1)) / series.length);
+    const width = Math.max(360, bins.length * (groupW + 12) + 48);
+    const height = 240;
+    const chartH = 180;
+    const parts = [`<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="第${question.no}题得分分布">`];
+    parts.push(`<line x1="36" y1="${height - 36}" x2="${width - 12}" y2="${height - 36}" stroke="#d7e0d4" />`);
+    parts.push(`<line x1="36" y1="24" x2="36" y2="${height - 36}" stroke="#d7e0d4" />`);
+    bins.forEach((bin, bi) => {
+      const gx = 44 + bi * (groupW + 12);
+      series.forEach((s, si) => {
+        const { counts } = scoreBins(scoresForQuestion(s.students, question), total);
+        const n = counts.get(bin) || 0;
+        const bh = (n / maxCount) * chartH;
+        const x = gx + si * (barW + barGap);
+        const y = height - 36 - bh;
+        parts.push(`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${bh.toFixed(1)}" rx="3" fill="${seriesColorById(s.id)}"><title>${escapeHtml(s.label)} · ${bin}分 · ${n}人</title></rect>`);
+      });
+      parts.push(`<text x="${(gx + groupW / 2).toFixed(1)}" y="${height - 18}" text-anchor="middle" font-size="11" fill="#6d7d74">${bin}</text>`);
+    });
+    parts.push(`<text x="12" y="20" font-size="11" fill="#6d7d74">人数</text>`);
+    parts.push("</svg>");
+    host.innerHTML = parts.join("");
+    if ($("chartSub")) {
+      $("chartSub").textContent = `第 ${question.no} 题 · 满分 ${total} · ${series.length} 个任务对比`;
+    }
+  }
+
+  function renderCompareStats(question) {
+    const root = $("compareStats");
+    if (!root) return;
+    const series = filteredSeries();
+    if (!series.length) {
+      root.innerHTML = "";
+      return;
+    }
+    const total = question.totalScore || 0;
+    const rows = series.map((s) => {
+      const scores = scoresForQuestion(s.students, question);
+      const n = scores.length;
+      const avg = mean(scores);
+      const med = median(scores);
+      const full = scores.filter((x) => x >= total - 0.001).length;
+      return { s, n, avg, med, full, fullRate: n ? full / n : 0 };
+    });
+    const baseAvg = rows[0]?.avg || 0;
+    root.innerHTML = `<table class="compare-table"><thead><tr>
+      <th>任务</th><th>人数</th><th>均分</th><th>中位数</th><th>满分率</th><th>均分差*</th>
+    </tr></thead><tbody>${rows.map((r, i) => {
+      const gap = r.avg - baseAvg;
+      const gapCls = i > 0 && Math.abs(gap) >= 1 ? " gap-warn" : "";
+      return `<tr>
+        <td><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${seriesColorById(r.s.id)};margin-right:6px"></i>${escapeHtml(r.s.fullLabel || r.s.label)}</td>
+        <td class="num">${r.n}</td>
+        <td class="num">${r.avg.toFixed(2)}</td>
+        <td class="num">${r.med.toFixed(2)}</td>
+        <td class="num">${fmtPct(r.fullRate)}</td>
+        <td class="num${gapCls}">${i === 0 ? "—" : (gap >= 0 ? "+" : "") + gap.toFixed(2)}</td>
+      </tr>`;
+    }).join("")}</tbody></table><p class="chart-sub">* 均分差相对表格中第一个任务的差值，用于粗看模型偏差</p>`;
+  }
+
+  function renderShortMain(question) {
+    renderSeriesPick();
+    renderScoreChart(question);
+    renderCompareStats(question);
   }
 
   function renderTaskFilter() {
@@ -870,7 +1108,7 @@
       const stats = questionStats(q);
       return `<button type="button" class="q-item${i === state.qIndex ? " on" : ""}" data-q="${i}">
         <span class="no">${q.no}</span>
-        <span><b>${escapeHtml(q.label || examTypeLabel(state.examType))}</b><small>${stats.full}/${stats.total}</small></span>
+        <span><b>${escapeHtml(q.label || examTypeLabel(state.examType))}</b><small>${state.examType === "short" ? `均分 ${stats.avgScore.toFixed(1)}` : `${stats.full}/${stats.total}`}</small></span>
         <span class="rate">${fmtPct(stats.studentRate)}</span>
       </button>`;
     }).join("");
@@ -879,13 +1117,22 @@
   function renderHeader(question, stats) {
     $("qBadge").textContent = question.no;
     $("qHeading").textContent = `第 ${question.no} 题`;
-    if (state.examType === "choice") {
+    if (state.examType === "short") {
+      $("qSub").textContent = `${question.label || "简答题"} · 满分 ${question.totalScore} · ai_mode=2`;
+    } else if (state.examType === "choice") {
       const opts = question.optionCount || (question.refAnswers || []).length || 4;
       $("qSub").textContent = `${opts} 项 · ${question.label || "选择题"} · 满分 ${question.totalScore}`;
     } else {
       $("qSub").textContent = `${question.blankCount} 空 · 满分 ${question.totalScore}`;
     }
-    if (state.examType === "choice") {
+    if (state.examType === "short") {
+      $("statRow").innerHTML = `
+        <div class="stat green"><b>${stats.avgScore.toFixed(2)}</b><span>均分</span></div>
+        <div class="stat"><b>${fmtPct(stats.studentRate)}</b><span>满分率</span></div>
+        <div class="stat"><b>${stats.full}/${stats.total}</b><span>满分人数</span></div>
+      `;
+      $("shownLabel").textContent = "人";
+    } else if (state.examType === "choice") {
       $("statRow").innerHTML = `
         <div class="stat green"><b>${stats.full}/${stats.total}</b><span>答对</span></div>
         <div class="stat"><b>${fmtPct(stats.studentRate)}</b><span>正确率</span></div>
@@ -1128,6 +1375,9 @@
     $("stuBody").innerHTML = "";
     $("foot").innerHTML = `<span>${examTypeLabel(state.examType)} · 数据来自所选文件夹中的 JSON</span><span></span>`;
     syncExamTypeSwitch();
+    syncWorkspaceMode();
+    if ($("scoreChart")) $("scoreChart").innerHTML = "";
+    if ($("compareStats")) $("compareStats").innerHTML = "";
   }
 
   function syncExamTypeSwitch() {
@@ -1139,21 +1389,27 @@
   }
 
   function render() {
+    syncWorkspaceMode();
     const question = (window.EXAM_DATA.questions || [])[state.qIndex];
     if (!question) {
       renderEmpty();
       return;
     }
+    const stats = questionStats(question);
+    renderNav();
+    renderHeader(question, stats);
+    if (state.examType === "short") {
+      renderShortMain(question);
+      updateCopyMetaBtn(null);
+      return;
+    }
     const maxBlank = (question.blankCount || 1) - 1;
     if (state.blankIndex > maxBlank) state.blankIndex = 0;
-    const stats = questionStats(question);
     const list = filteredStudents(question);
     if (!list.some((s) => s.key === state.studentKey)) {
       state.studentKey = list[0] ? list[0].key : "";
     }
     const student = currentStudent(list);
-    renderNav();
-    renderHeader(question, stats);
     renderBlankTabs(question);
     renderSlice(question, student);
     renderTable(question, list, student);
@@ -1215,6 +1471,13 @@
     });
     $("taskFilter").addEventListener("change", (e) => {
       state.taskFilter = e.target.value || "all";
+      render();
+    });
+    $("seriesPick").addEventListener("change", (e) => {
+      const cb = e.target.closest("[data-series]");
+      if (!cb) return;
+      if (cb.checked) state.compareTasks.add(cb.dataset.series);
+      else state.compareTasks.delete(cb.dataset.series);
       render();
     });
     $("stuBody").addEventListener("click", (e) => {
@@ -1330,5 +1593,6 @@
 
   bind();
   syncExamTypeSwitch();
+  syncWorkspaceMode();
   renderEmpty();
 })();
