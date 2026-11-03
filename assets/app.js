@@ -18,6 +18,7 @@
     zoom: 1.25,
     compareTasks: new Set(),
     folderPickAppend: false,
+    jsonPickAppend: false,
   };
 
   let folderSourceSeq = 0;
@@ -387,8 +388,49 @@
     return Object.values(meta).sort((a, b) => a.no - b.no);
   }
 
-  /** @type {{ id: string, name: string, handle: FileSystemDirectoryHandle|null, files: File[] }[]} */
+  /** @type {{ id: string, name: string, handle: FileSystemDirectoryHandle|null, files: File[], bundleFile: File|null }[]} */
   const folderSources = [];
+
+  function unwrapExtendedJson(val) {
+    if (val == null || typeof val !== "object") return val;
+    if (Array.isArray(val)) return val.map(unwrapExtendedJson);
+    if (Object.prototype.hasOwnProperty.call(val, "$numberInt")) return Number(val.$numberInt);
+    if (Object.prototype.hasOwnProperty.call(val, "$numberLong")) return Number(val.$numberLong);
+    if (Object.prototype.hasOwnProperty.call(val, "$numberDouble")) return Number(val.$numberDouble);
+    if (Object.prototype.hasOwnProperty.call(val, "$oid")) return String(val.$oid);
+    const out = {};
+    for (const [k, v] of Object.entries(val)) out[k] = unwrapExtendedJson(v);
+    return out;
+  }
+
+  function parseEmbeddedJsonField(val) {
+    if (typeof val !== "string") return val;
+    const t = val.trim();
+    if (!t.startsWith("{") && !t.startsWith("[")) return val;
+    try {
+      return unwrapExtendedJson(JSON.parse(t));
+    } catch (_) {
+      return val;
+    }
+  }
+
+  /** Mongo / MySQL 导出：内嵌 JSON 字符串、Extended JSON 数字 */
+  function normalizeStudentRec(rec) {
+    if (!rec || typeof rec !== "object" || Array.isArray(rec)) return rec;
+    const r = unwrapExtendedJson(rec);
+    r.questions = parseEmbeddedJsonField(r.questions);
+    r.ai_questions = parseEmbeddedJsonField(r.ai_questions);
+    if (r.stu_no_detect != null) r.stu_no_detect = parseEmbeddedJsonField(r.stu_no_detect);
+    if (Array.isArray(r.ai_questions)) r.ai_questions = unwrapExtendedJson(r.ai_questions);
+    if (Array.isArray(r.questions)) r.questions = unwrapExtendedJson(r.questions);
+    return r;
+  }
+
+  function parseRawStudentRecord(raw, relPath, sourceMeta) {
+    const rec = normalizeStudentRec(raw);
+    if (!isStudentRec(rec)) return null;
+    return studentFromRec(rec, relPath, sourceMeta);
+  }
 
   function isStudentRec(rec) {
     if (!rec || typeof rec !== "object") return false;
@@ -504,10 +546,21 @@
 
   function parseJsonFile(file, relPath, sourceMeta) {
     return file.text().then((text) => {
-      const rec = JSON.parse(text);
-      if (!isStudentRec(rec)) return null;
-      return studentFromRec(rec, relPath, sourceMeta);
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return null;
+      return parseRawStudentRecord(parsed, relPath, sourceMeta);
     }).catch(() => null);
+  }
+
+  async function loadRecsFromJsonBundle(file, sourceMeta) {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    const base = file.name || "export.json";
+    return list
+      .map((raw, i) => parseRawStudentRecord(raw, `${base}#${i + 1}`, sourceMeta))
+      .filter(Boolean)
+      .filter(hasParsedQuestions);
   }
 
   async function collectJsonHandles(dirHandle, prefix) {
@@ -517,7 +570,10 @@
       if (handle.kind === "directory") {
         if (name.startsWith(".") || name === "assets" || name === "node_modules") continue;
         items.push(...await collectJsonHandles(handle, path));
-      } else if (/\.json$/i.test(name) && !/^(package(-lock)?|tsconfig|exam)\.json$/i.test(name)) {
+      } else if (
+        /\.json$/i.test(name)
+        && !/^(package(-lock)?|tsconfig|exam|sql)\.json$/i.test(name)
+      ) {
         items.push({ name, path, handle });
       }
     }
@@ -543,7 +599,7 @@
     const files = Array.from(fileList || []).filter((file) => {
       const name = (file.webkitRelativePath || file.name).replace(/\\/g, "/");
       const base = name.split("/").pop();
-      return /\.json$/i.test(base) && !/^(package(-lock)?|tsconfig|exam)\.json$/i.test(base);
+      return /\.json$/i.test(base) && !/^(package(-lock)?|tsconfig|exam|sql)\.json$/i.test(base);
     });
     files.sort((a, b) => (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name, "en", { numeric: true }));
     let recs = (await Promise.all(files.map((file) => {
@@ -561,7 +617,8 @@
     for (const src of folderSources) {
       const meta = { sourceId: src.id, sourceName: src.name };
       let recs = [];
-      if (src.handle) recs = await loadRecsFromDirectoryHandle(src.handle, meta);
+      if (src.bundleFile) recs = await loadRecsFromJsonBundle(src.bundleFile, meta);
+      else if (src.handle) recs = await loadRecsFromDirectoryHandle(src.handle, meta);
       else if (src.files && src.files.length) recs = await loadRecsFromFileList(src.files, meta);
       if (!recs.length) {
         throw new Error(`「${src.name}」里没有可解析的${examTypeLabel(state.examType)} JSON`);
@@ -585,12 +642,35 @@
         name: handle.name,
         handle,
         files: [],
+        bundleFile: null,
       });
       await loadAllFolderSources();
       return;
     }
     state.folderPickAppend = append;
     $("folderInput").click();
+  }
+
+  async function pickJsonBundle({ append = false } = {}) {
+    if (window.showOpenFilePicker) {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: "JSON", accept: { "application/json": [".json"] } }],
+        multiple: false,
+      });
+      const file = await handle.getFile();
+      if (!append) folderSources.length = 0;
+      folderSources.push({
+        id: newFolderSourceId(),
+        name: file.name,
+        handle: null,
+        files: [],
+        bundleFile: file,
+      });
+      await loadAllFolderSources();
+      return;
+    }
+    state.jsonPickAppend = append;
+    $("jsonFileInput").click();
   }
 
   async function pickCompareFolder() {
@@ -1619,6 +1699,16 @@
       state.zoom = SLICE_ZOOM_DEFAULT;
       render();
     });
+    $("pickJsonBtn").addEventListener("click", async () => {
+      try {
+        await pickJsonBundle({ append: false });
+        render();
+      } catch (err) {
+        if (err && err.name === "AbortError") return;
+        console.error(err);
+        $("folderMeta").textContent = "读取失败：" + (err.message || err);
+      }
+    });
     $("pickFolderBtn").addEventListener("click", async () => {
       try {
         await pickFolder({ append: false });
@@ -1657,8 +1747,31 @@
         name,
         handle: null,
         files,
+        bundleFile: null,
       });
       state.folderPickAppend = false;
+      try {
+        await loadAllFolderSources();
+        render();
+      } catch (err) {
+        console.error(err);
+        $("folderMeta").textContent = "读取失败：" + (err.message || err);
+      }
+      e.target.value = "";
+    });
+    $("jsonFileInput").addEventListener("change", async (e) => {
+      const file = (e.target.files || [])[0];
+      if (!file) return;
+      const append = state.jsonPickAppend;
+      if (!append) folderSources.length = 0;
+      folderSources.push({
+        id: newFolderSourceId(),
+        name: file.name,
+        handle: null,
+        files: [],
+        bundleFile: file,
+      });
+      state.jsonPickAppend = false;
       try {
         await loadAllFolderSources();
         render();

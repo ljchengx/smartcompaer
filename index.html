@@ -19,11 +19,13 @@
           <button type="button" data-type="choice">选择题</button>
           <button type="button" data-type="short">简答题</button>
         </div>
-        <button type="button" class="folder-btn" id="pickFolderBtn">选择文件夹</button>
+        <button type="button" class="folder-btn" id="pickJsonBtn">选择 JSON 文件</button>
+        <button type="button" class="text-btn" id="pickFolderBtn">选择文件夹</button>
         <button type="button" class="text-btn" id="addCompareFolderBtn" disabled title="再选一个目录，与已加载数据对比">添加对比目录</button>
         <button type="button" class="text-btn" id="reloadBtn" disabled>重新读取</button>
         <button type="button" class="text-btn" id="exportBtn" disabled>导出正确率</button>
         <input id="folderInput" type="file" webkitdirectory multiple accept=".json,application/json" hidden />
+        <input id="jsonFileInput" type="file" accept=".json,application/json" hidden />
         <label class="task-filter">
           <span class="sr-only">任务筛选</span>
           <select id="taskFilter" disabled>
@@ -31,7 +33,7 @@
           </select>
         </label>
         <div class="folder-source-chips" id="folderSourceChips"></div>
-        <p class="folder-meta" id="folderMeta">先选题型，再选择目录；简答题可点「添加对比目录」选多个文件夹</p>
+        <p class="folder-meta" id="folderMeta">简答题：可先选线上导出 JSON（如 sql.json），再「添加对比目录」选本地重跑文件夹（如 2026）</p>
       </div>
       <div class="q-strip">
         <div class="q-badge" id="qBadge">—</div>
@@ -132,6 +134,6 @@
     </main>
   </div>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
-  <script defer src="assets/app.js?v=35"></script>
+  <script defer src="assets/app.js?v=36"></script>
 </body>
 </html>
